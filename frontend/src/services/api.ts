@@ -96,9 +96,7 @@ function extractErrorMessage(data: Record<string, unknown>, status: number, trac
 
 function stripHtml(value: string): string {
 	const doc = new DOMParser().parseFromString(value, "text/html");
-	return (doc.body.textContent || "")
-		.replace(/\s+/g, " ")
-		.trim();
+	return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
 }
 
 async function fetchCall<T = unknown>(method: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -267,4 +265,20 @@ export function showError(message: string): void {
  */
 export function showInfo(message: string): void {
 	toastInfo(message);
+}
+
+/**
+ * Load translations for the current user's language
+ * Call this after login to update window.xpos._messages
+ */
+export async function loadUserTranslations(): Promise<void> {
+	try {
+		const translations = await call<Record<string, string>>("xpos.api.utilities.get_user_translations");
+		if (window.xpos) {
+			window.xpos._messages = translations;
+		}
+	} catch (error) {
+		console.error("Failed to load user translations:", error);
+		// Don't throw - translations are not critical for app to function
+	}
 }

@@ -257,3 +257,14 @@ def can_settle_outstanding(pos_profile: str | None = None, user: str | None = No
 		return False
 
 	return user_has_pos_permission("settle_outstanding_invoice", user, pos_profile)
+
+
+@frappe.whitelist()
+def get_user_translations():
+	"""Return translations for the current user's language.
+
+	Called after login to update translations without page reload.
+	"""
+	from frappe.translate import get_messages_for_boot
+
+	return get_messages_for_boot()

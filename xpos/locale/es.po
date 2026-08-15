@@ -2987,6 +2987,7 @@ msgstr "Método de pago"
 #. Label of the mode_of_payment (Link) field in DocType 'POS Closing Shift
 #. Detail'
 #. Label of the mode_of_payment (Link) field in DocType 'POS Opening Shift
+#. Detail'
 #: xpos/x_pos/api/payment_processing/data.py:181
 #: xpos/x_pos/doctype/pos_closing_shift/closing_shift_details.html:58
 #: xpos/x_pos/doctype/pos_closing_shift_detail/pos_closing_shift_detail.json
@@ -6690,3 +6691,71 @@ msgstr "{0} {1} debe estar contabilizado antes de crear los asientos del pago de
 #: xpos/x_pos/workspace/x_pos/x_pos.json
 msgid "{} Active"
 msgstr "{} activo"
+
+#: frontend/src/components/dialogs/PaymentDialog.vue:573
+msgid "Return & Send"
+msgstr "Devolver y Enviar"
+
+#: frontend/src/components/dialogs/PaymentDialog.vue:573
+msgid "Save & Send"
+msgstr "Guardar y Enviar"
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:5
+#: frontend/src/components/dialogs/CommunicationComposer.vue:86
+msgctxt "EmailXPOS"
+msgid "Send Email"
+msgstr "Enviar correo electrónico"
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:12
+msgctxt "Addresses"
+msgid "To"
+msgstr "Destinatarios"
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:16
+msgid "addressee@mail.com"
+msgstr "destinatario@mail.com"
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:29
+msgid "copy@mail.com (optional)"
+msgstr "copia@mail.com"
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:21
+msgid "Please enter at least one valid recipient"
+msgstr "Ingresa al menos un destinatario válido"
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:42
+msgid "No Template"
+msgstr "Sin plantilla"
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:67
+msgid "Subject"
+msgstr "Asunto"
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:76
+msgid "Write your email here..."
+msgstr "Escriba su correo aqui..."
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:86
+msgid "Sending..."
+msgstr "Enviando..."
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:160
+msgid "Could not load the selected template"
+msgstr "No se pudo cargar la plantilla seleccionada"
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:188
+msgid "Email sent successfully"
+msgstr "Correo enviado correctamente"
+
+#: frontend/src/components/dialogs/CommunicationComposer.vue:192
+msgid "Could not send the email"
+msgstr "No se pudo enviar el correo"
+
+#: frontend/src/components/dialogs/ReceiptPreviewDialog.vue:291
+msgid "Send"
+msgstr "Enviar"
+
+#: frontend/src/stores/useEmailStore.ts:59
+#: frontend/src/composables/useSendEmail.ts:51
+msgid "Cannot email an invoice that hasn't been saved yet"
+msgstr "No se puede enviar una factura sin guardar"

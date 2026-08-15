@@ -1842,3 +1842,34 @@ def get_invoice_for_repeat(invoice_name: str, pos_profile: str = "", doctype: st
 		"currency": doc.currency,
 		"items": items,
 	}
+
+
+@frappe.whitelist()
+def send_invoice_email(
+	doctype: str,
+	docname: str,
+	recipients: str | list,
+	cc: str | list,
+	subject: str,
+	content: str,
+	print_format: str,
+):
+	if isinstance(recipients, str):
+		recipients = json.loads(recipients)
+	if isinstance(cc, str):
+		cc = json.loads(cc)
+
+	attach = [
+		frappe.attach_print(doctype=doctype, name=docname, file_name=docname, print_format=print_format)
+	]
+	frappe.sendmail(
+		recipients=recipients,
+		cc=cc,
+		subject=subject,
+		message=content,
+		attachments=attach,
+		reference_doctype=doctype,
+		reference_name=docname,
+		now=True,
+	)
+	return True

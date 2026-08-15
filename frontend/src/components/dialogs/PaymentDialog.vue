@@ -498,6 +498,11 @@
 					<span>{{ __("Save & Print") }}</span>
 					<span class="mx-1">|</span>
 					<kbd class="px-1.5 py-0.5 font-mono bg-muted rounded border border-border"
+						>Shift+Enter</kbd
+					>
+					<span>{{ __("Save & Send") }}</span>
+					<span class="mx-1">|</span>
+					<kbd class="px-1.5 py-0.5 font-mono bg-muted rounded border border-border"
 						>Ctrl+Enter</kbd
 					>
 					<span>{{ __("Save Only") }}</span>
@@ -507,36 +512,69 @@
 				</div>
 				<div class="flex items-center gap-2">
 					<Button variant="outline" @click="close" tabindex="-1">{{ __("Cancel") }}</Button>
-					<Button
-						variant="outline"
-						class="font-medium"
-						:disabled="isSubmitting || !canSubmit"
-						@click="submitPayment(false)"
-					>
-						<template v-if="isSubmitting && !printAfterSave">
-							<Loader2 class="w-4 h-4 animate-spin" />
-						</template>
-						<template v-else>
-							<Save class="w-4 h-4" />
-						</template>
-						{{ __("Save Only") }}
-					</Button>
-					<Button
-						ref="submitBtn"
-						:variant="cartStore.isReturnMode ? 'destructive' : 'success'"
-						class="font-bold px-4 shadow-md"
-						:disabled="isSubmitting || !canSubmit"
-						@click="submitPayment(true)"
-					>
-						<template v-if="isSubmitting && printAfterSave">
-							<Loader2 class="w-4 h-4 animate-spin" />
-							{{ __("Processing...") }}
-						</template>
-						<template v-else>
-							<Printer class="w-4 h-4" />
-							{{ cartStore.isReturnMode ? __("Return & Print") : __("Save & Print") }}
-						</template>
-					</Button>
+					<Popover>
+						<PopoverTrigger>
+							<Button variant="outline">{{ __("Save") }}</Button>
+						</PopoverTrigger>
+						<PopoverContentStyled class="w-56 p-1" align="end" :side="'top'">
+							<Button
+								variant="ghost"
+								class="w-full justify-start gap-3 h-12 text-base font-medium"
+								:disabled="isSubmitting || !canSubmit"
+								@click="submitPayment(false, false)"
+							>
+								<template v-if="isSubmitting && !printAfterSave">
+									<Loader2 class="w-5 h-5 animate-spin" />
+								</template>
+								<template v-else>
+									<Save class="w-5 h-5" />
+								</template>
+								{{ __("Save Only") }}
+							</Button>
+							<Button
+								ref="submitBtn"
+								variant="ghost"
+								:class="
+									cartStore.isReturnMode
+										? 'text-red-600 hover:bg-red-50 dark:hover:bg-red-950'
+										: 'text-green-600 hover:bg-green-50 dark:hover:bg-green-950'
+								"
+								class="w-full justify-start gap-3 h-12 text-base font-medium"
+								:disabled="isSubmitting || !canSubmit"
+								@click="submitPayment(false, true)"
+							>
+								<template v-if="isSubmitting && emailAfterSave">
+									<Loader2 class="w-5 h-5 animate-spin" />
+									{{ __("Processing...") }}
+								</template>
+								<template v-else>
+									<Mail class="w-5 h-5" />
+									{{ cartStore.isReturnMode ? __("Return & Send") : __("Save & Send") }}
+								</template>
+							</Button>
+							<Button
+								ref="submitBtn"
+								variant="ghost"
+								:class="
+									cartStore.isReturnMode
+										? 'text-red-600 hover:bg-red-50 dark:hover:bg-red-950'
+										: 'text-green-600 hover:bg-green-50 dark:hover:bg-green-950'
+								"
+								class="w-full justify-start gap-3 h-12 text-base font-medium"
+								:disabled="isSubmitting || !canSubmit"
+								@click="submitPayment(true, false)"
+							>
+								<template v-if="isSubmitting && printAfterSave">
+									<Loader2 class="w-5 h-5 animate-spin" />
+									{{ __("Processing...") }}
+								</template>
+								<template v-else>
+									<Printer class="w-5 h-5" />
+									{{ cartStore.isReturnMode ? __("Return & Print") : __("Save & Print") }}
+								</template>
+							</Button>
+						</PopoverContentStyled>
+					</Popover>
 				</div>
 			</DialogFooter>
 		</DialogContent>
@@ -550,9 +588,11 @@ import { useCartStore } from "@/stores/cartStore";
 import { useAuthStore } from "@/stores/authStore";
 import { usePaymentStore } from "@/stores/paymentStore";
 import { call, showSuccess, showError, showInfo, isNetworkError } from "@/services/api";
+import { Popover, PopoverContentStyled, PopoverTrigger } from "@/components/ui/popover";
 import { useOfflineStore } from "@/stores/offlineStore";
 import { __ } from "@/lib/translate";
 import { usePrintInvoice } from "@/composables/usePrintInvoice";
+import { useEmailStore } from "@/stores/useEmailStore";
 import { isElectron } from "@/services/electronBridge";
 import { fiscalizeViaLocalService } from "@/services/fbrLocalService";
 import {
@@ -584,6 +624,7 @@ import {
 	Smartphone,
 	FileText,
 	DollarSign,
+	Mail,
 } from "lucide-vue-next";
 
 import type { InvoiceData, InvoicePayment } from "@/types/pos.types";
@@ -592,10 +633,12 @@ import { nowDate } from "@/utils/datetime";
 import {
 	isPaymentDialogSaveAndPrintShortcut,
 	isPaymentDialogSaveOnlyShortcut,
+	isPaymentDialogSaveAndEmail,
 } from "@/components/dialogs/paymentDialogShortcuts";
 
 const posStore = usePosStore();
 const { printInvoice, printInvoiceLocal } = usePrintInvoice();
+const emailStore = useEmailStore();
 const cartStore = useCartStore();
 const authStore = useAuthStore();
 const paymentStore = usePaymentStore();
@@ -612,6 +655,7 @@ const tenderedAmount = ref(0);
 const isSubmitting = ref(false);
 const writeOffInput = ref(0);
 const printAfterSave = ref(false);
+const emailAfterSave = ref(false);
 
 const isSplitPayment = ref(false);
 const splitPayments = ref<InvoicePayment[]>([]);
@@ -790,7 +834,7 @@ function handleAmountInputSubmit(event: KeyboardEvent) {
 
 	if (isPaymentDialogSaveOnlyShortcut(event)) {
 		if (canSubmit.value) {
-			submitPayment(false);
+			submitPayment(false, false);
 		}
 		return;
 	}
@@ -801,7 +845,10 @@ function handleAmountInputSubmit(event: KeyboardEvent) {
 	}
 
 	if (isPaymentDialogSaveAndPrintShortcut(event) && canSubmit.value) {
-		submitPayment(true);
+		submitPayment(true, false);
+	}
+	if (isPaymentDialogSaveAndEmail(event) && canSubmit.value) {
+		submitPayment(false, true);
 	}
 }
 
@@ -811,7 +858,7 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 	if (isPaymentDialogSaveOnlyShortcut(e) && canSubmit.value) {
 		e.preventDefault();
 		e.stopPropagation();
-		submitPayment(false);
+		submitPayment(false, false);
 		return;
 	}
 
@@ -820,7 +867,15 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 		if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
 		e.preventDefault();
 		e.stopPropagation();
-		submitPayment(true);
+		submitPayment(true, false);
+	}
+
+	if (isPaymentDialogSaveAndEmail(e) && canSubmit.value) {
+		const target = e.target as HTMLElement;
+		if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+		e.preventDefault();
+		e.stopPropagation();
+		submitPayment(false, true);
 	}
 }
 
@@ -1018,7 +1073,7 @@ function applySubmissionPayments(invoiceData: InvoiceData): void {
 	}
 }
 
-async function submitPayment(withPrint: boolean = true) {
+async function submitPayment(withPrint: boolean = true, withEmail: boolean = true) {
 	if (isSubmitting.value) return;
 
 	if (showLoyaltyInput.value && !cartStore.redeemLoyaltyPoints && (redeemPointsInput.value || 0) > 0) {
@@ -1041,6 +1096,7 @@ async function submitPayment(withPrint: boolean = true) {
 
 	isSubmitting.value = true;
 	printAfterSave.value = withPrint;
+	emailAfterSave.value = withEmail;
 
 	try {
 		const shiftName = posStore.posOpeningShift?.name || "";
@@ -1120,6 +1176,10 @@ async function submitPayment(withPrint: boolean = true) {
 
 		if (withPrint && result.name) {
 			await printInvoice(result.name);
+		}
+
+		if (withEmail && result.name) {
+			emailStore.openEmailComposer(result.name);
 		}
 
 		cartStore.clearAll();

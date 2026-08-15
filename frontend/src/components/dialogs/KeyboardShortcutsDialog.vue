@@ -50,22 +50,31 @@
 							{{ __("Navigation") }}
 						</h3>
 						<div class="space-y-1.5">
-							<ShortcutItem :shortcut="['Alt', '1']" :description="__('Go to POS')" />
-							<ShortcutItem :shortcut="['Alt', '2']" :description="__('Go to Orders')" />
+							<ShortcutItem :shortcut="['Alt', 'Shift', '1']" :description="__('Go to POS')" />
 							<ShortcutItem
-								:shortcut="['Alt', '3']"
+								:shortcut="['Alt', 'Shift', '2']"
+								:description="__('Go to Orders')"
+							/>
+							<ShortcutItem
+								:shortcut="['Alt', 'Shift', '3']"
 								:description="__('Go to Purchase Order')"
 							/>
 							<ShortcutItem
-								:shortcut="['Alt', '4']"
+								:shortcut="['Alt', 'Shift', '4']"
 								:description="__('Go to Purchase Invoice')"
 							/>
 							<ShortcutItem
-								:shortcut="['Alt', '5']"
+								:shortcut="['Alt', 'Shift', '5']"
 								:description="__('Go to Stock Receiving')"
 							/>
-							<ShortcutItem :shortcut="['Alt', '6']" :description="__('Go to Expenses')" />
-							<ShortcutItem :shortcut="['Alt', '7']" :description="__('Go to Bank Drops')" />
+							<ShortcutItem
+								:shortcut="['Alt', 'Shift', '6']"
+								:description="__('Go to Expenses')"
+							/>
+							<ShortcutItem
+								:shortcut="['Alt', 'Shift', '7']"
+								:description="__('Go to Bank Drops')"
+							/>
 						</div>
 					</div>
 

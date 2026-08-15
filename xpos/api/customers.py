@@ -89,7 +89,7 @@ def get_customer_info(customer: str):
 	if not customer:
 		return None
 
-	cust = frappe.get_cached_doc("Customer", customer)
+	cust = frappe.get_doc("Customer", customer)
 	balance = get_customer_balance(customer)
 	loyalty = get_loyalty_points(customer)
 

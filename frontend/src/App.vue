@@ -46,6 +46,15 @@
 
 			<PaymentDialog v-if="cartStore.showPaymentDialog" />
 
+			<CommunicationComposer
+				v-if="emailComposerProps"
+				v-model="showEmailComposer"
+				:doctype="emailComposerProps.doctype"
+				:docname="emailComposerProps.docname"
+				:default-recipient="emailComposerProps.defaultRecipient"
+				:default-subject="emailComposerProps.defaultSubject"
+			/>
+
 			<CustomerSelect v-if="customerStore.showCustomerDialog" />
 
 			<LoyaltyDialog v-if="customerStore.showLoyaltyDialog" />
@@ -144,6 +153,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from "vue";
+import { storeToRefs } from "pinia";
 import { useRoute } from "vue-router";
 import { Toaster } from "vue-sonner";
 import { usePosStore } from "@/stores/posStore";
@@ -151,11 +161,13 @@ import { useCartStore } from "@/stores/cartStore";
 import { useCustomerStore } from "@/stores/customerStore";
 import { useItemStore } from "@/stores/itemStore";
 import { usePaymentStore } from "@/stores/paymentStore";
+import { useEmailStore } from "@/stores/useEmailStore";
 import { useAuthStore } from "@/stores/authStore";
 import DefaultLayout from "@/layouts/DefaultLayout.vue";
 import OpeningDialog from "@/components/dialogs/OpeningDialog.vue";
 import ClosingDialog from "@/components/dialogs/ClosingDialog.vue";
 import PaymentDialog from "@/components/dialogs/PaymentDialog.vue";
+import CommunicationComposer from "@/components/dialogs/CommunicationComposer.vue";
 import CustomerSelect from "@/components/customer/CustomerSelect.vue";
 import LoyaltyDialog from "@/components/dialogs/LoyaltyDialog.vue";
 import ItemDetailDialog from "@/components/dialogs/ItemDetailDialog.vue";
@@ -185,6 +197,8 @@ const cartStore = useCartStore();
 const customerStore = useCustomerStore();
 const itemStore = useItemStore();
 const paymentStore = usePaymentStore();
+const emailStore = useEmailStore();
+const { showComposer: showEmailComposer, composerProps: emailComposerProps } = storeToRefs(emailStore);
 const authStore = useAuthStore();
 const offlineStore = useOfflineStore();
 const syncStatus = useSyncStatus();

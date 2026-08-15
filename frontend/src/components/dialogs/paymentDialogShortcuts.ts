@@ -7,3 +7,7 @@ export function isPaymentDialogSaveOnlyShortcut(event: PaymentDialogShortcutEven
 export function isPaymentDialogSaveAndPrintShortcut(event: PaymentDialogShortcutEvent): boolean {
 	return event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
 }
+
+export function isPaymentDialogSaveAndEmail(event: PaymentDialogShortcutEvent): boolean {
+	return event.key === "Enter" && !event.metaKey && !event.altKey && (event.ctrlKey || event.shiftKey);
+}

@@ -107,7 +107,7 @@ export function useKeyboardShortcuts() {
 		},
 		{
 			id: "goto-pos",
-			keys: ["alt", "1"],
+			keys: ["alt", "shift", "1"],
 			description: "Go to POS",
 			category: "Navigation",
 			global: true,
@@ -117,7 +117,7 @@ export function useKeyboardShortcuts() {
 		},
 		{
 			id: "goto-orders",
-			keys: ["alt", "2"],
+			keys: ["alt", "shift", "2"],
 			description: "Go to Orders",
 			category: "Navigation",
 			global: true,
@@ -127,7 +127,7 @@ export function useKeyboardShortcuts() {
 		},
 		{
 			id: "goto-purchase-order",
-			keys: ["alt", "3"],
+			keys: ["alt", "shift", "3"],
 			description: "Go to Purchase Order",
 			category: "Navigation",
 			global: true,
@@ -137,7 +137,7 @@ export function useKeyboardShortcuts() {
 		},
 		{
 			id: "goto-purchase-invoice",
-			keys: ["alt", "4"],
+			keys: ["alt", "shift", "4"],
 			description: "Go to Purchase Invoice",
 			category: "Navigation",
 			global: true,
@@ -147,7 +147,7 @@ export function useKeyboardShortcuts() {
 		},
 		{
 			id: "goto-stock-receiving",
-			keys: ["alt", "5"],
+			keys: ["alt", "shift", "5"],
 			description: "Go to Stock Receiving",
 			category: "Navigation",
 			global: true,
@@ -157,7 +157,7 @@ export function useKeyboardShortcuts() {
 		},
 		{
 			id: "goto-expenses",
-			keys: ["alt", "6"],
+			keys: ["alt", "shift", "6"],
 			description: "Go to Expenses",
 			category: "Navigation",
 			global: true,
@@ -167,7 +167,7 @@ export function useKeyboardShortcuts() {
 		},
 		{
 			id: "goto-bank-drops",
-			keys: ["alt", "7"],
+			keys: ["alt", "shift", "7"],
 			description: "Go to Bank Drops",
 			category: "Navigation",
 			global: true,
@@ -177,7 +177,7 @@ export function useKeyboardShortcuts() {
 		},
 		{
 			id: "goto-barcode-print",
-			keys: ["alt", "8"],
+			keys: ["alt", "shift", "8"],
 			description: "Go to Barcode Printer",
 			category: "Navigation",
 			global: true,
@@ -187,7 +187,7 @@ export function useKeyboardShortcuts() {
 		},
 		{
 			id: "goto-reports",
-			keys: ["alt", "9"],
+			keys: ["alt", "shift", "9"],
 			description: "Go to Reports",
 			category: "Navigation",
 			global: true,
@@ -197,7 +197,7 @@ export function useKeyboardShortcuts() {
 		},
 		{
 			id: "goto-cashier",
-			keys: ["alt", "0"],
+			keys: ["alt", "shift", "0"],
 			description: "Go to Cashier",
 			category: "Navigation",
 			global: true,

@@ -1,4 +1,4 @@
-import { call } from "@/services/api";
+import { call, loadUserTranslations } from "@/services/api";
 import { isElectron } from "@/services/electronBridge";
 import { loadPermissions, resetPermissions } from "@/services/userRights";
 import { UserSession } from "@/types/pos.types";
@@ -137,6 +137,10 @@ export const useAuthStore = defineStore("auth", () => {
 			};
 
 			await loadPermissions(username);
+
+			// Load translations in user's language without page reload
+			await loadUserTranslations();
+
 			return true;
 		} catch (err) {
 			console.error("Login failed:", err);

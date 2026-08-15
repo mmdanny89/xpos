@@ -300,7 +300,7 @@ export const useCartStore = defineStore("cart", () => {
 		}
 		total = isReturnMode.value ? total : Math.max(0, total);
 		if (!posStore.disableRoundedTotal && total !== 0) {
-			total = Math.round(total);
+			total = Math.round(total * 100) / 100;
 		}
 		return total;
 	});

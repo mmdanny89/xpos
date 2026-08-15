@@ -20,12 +20,21 @@ function getMessages(): Record<string, string> {
  * @param args - Optional format arguments for string interpolation
  * @returns Translated string or original if no translation found
  */
-export function __(txt: string, args?: TranslateArgs): string {
+export function __(txt: string, args?: TranslateArgs, context?: string): string {
 	if (!txt) return txt;
 
 	const messages = getMessages();
-	let translated = messages[txt] || txt;
+	let translated = ""; //messages[txt] || txt;
 
+	if (context) {
+		let key = `${txt}:${context}`;
+		if (messages[key]) {
+			translated = messages[key];
+		}
+	}
+	if (!translated) {
+		translated = messages[txt] || txt;
+	}
 	// Handle string interpolation with {0}, {1}, etc.
 	if (args && args.length > 0) {
 		translated = translated.replace(/\{(\d+)\}/g, (match, index) => {
@@ -33,7 +42,6 @@ export function __(txt: string, args?: TranslateArgs): string {
 			return argIndex < args.length ? String(args[argIndex]) : match;
 		});
 	}
-
 	return translated;
 }
 

@@ -282,6 +282,15 @@
 					{{ __("Print") }}
 				</Button>
 				<Button
+					variant="outline"
+					class="text-green-600 hover:bg-green-50"
+					size="sm"
+					@click="sendEmailInvoice(invoice!.name)"
+				>
+					<Mail class="w-4 h-4" />
+					{{ __("Send") }}
+				</Button>
+				<Button
 					v-if="invoice && !invoice.is_return"
 					variant="outline"
 					size="sm"
@@ -311,7 +320,7 @@
 </template>
 
 <script setup lang="ts">
-import { RotateCcw, Printer, Repeat, Loader2 } from "lucide-vue-next";
+import { RotateCcw, Printer, Repeat, Loader2, Mail } from "lucide-vue-next";
 import {
 	Dialog,
 	DialogContent as DialogScrollContent,
@@ -325,8 +334,9 @@ import { hasPermission } from "@/services/userRights";
 import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { usePosStore } from "@/stores/posStore";
 import { useCartStore } from "@/stores/cartStore";
+import { useEmailStore } from "@/stores/useEmailStore";
 import __ from "@/lib/translate";
-import { ref } from "vue";
+import { ref, nextTick } from "vue";
 import { Invoice } from "@/types/pos.types";
 import { useRouter } from "vue-router";
 import { call, showError } from "@/services/api";
@@ -341,6 +351,8 @@ const emit = defineEmits<{ close: [] }>();
 
 const posStore = usePosStore();
 const cartStore = useCartStore();
+const emailStore = useEmailStore();
+
 const router = useRouter();
 
 const isRepeatLoading = ref(false);
@@ -369,6 +381,12 @@ function orderDateTime(order: Invoice): string {
 function printInvoice(name: string) {
 	const url = `/printview?doctype=${posStore.invoiceType}&name=${name}&format=${posStore.defaultPrintFormat}&no_letterhead=0&trigger_print=1`;
 	window.open(get_full_url(url), "_blank");
+}
+
+async function sendEmailInvoice(name: string) {
+	emit("close");
+	await nextTick();
+	emailStore.openEmailComposer(name);
 }
 
 async function repeatFromOrder(order: Invoice) {

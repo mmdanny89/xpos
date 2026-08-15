@@ -146,7 +146,10 @@
 		<ReceiptPreviewDialog
 			v-model:open="showDetails"
 			:invoice="selectedOrder"
-			@close="showDetails = false"
+			@close="
+				showDetails = false;
+				selectedOrder = null;
+			"
 		/>
 	</div>
 </template>
