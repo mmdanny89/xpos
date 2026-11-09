@@ -16,8 +16,10 @@ import {
 	type TaxDetail,
 	type PrintSettings,
 	type ReceiptContext,
+	type GiftCardConfig,
 } from "@/types/pos.types";
 import { isOnline } from "@/utils";
+import { symbolFor } from "@/composables/useCurrency";
 
 export const usePosStore = defineStore("pos", () => {
 	const isLoading = ref(true);
@@ -31,11 +33,11 @@ export const usePosStore = defineStore("pos", () => {
 	const taxes = ref<TaxDetail[]>([]);
 	const taxInclusiveMode = ref(false);
 	const disableRoundedTotal = ref(false);
+	const giftCardConfig = ref<GiftCardConfig | null>(null);
 	const printSettings = ref<PrintSettings | null>(null);
 	const showOpeningDialog = ref(false);
 	const openingData = ref<OpeningData | null>(null);
 	const showClosingDialog = ref(false);
-	const closingData = ref<ShiftSummary | null>(null);
 	const printFormats = ref<PrintFormat[]>([]);
 	const lastInvoiceName = ref("");
 	const isShiftOpen = computed(() => !!posOpeningShift.value);
@@ -50,26 +52,46 @@ export const usePosStore = defineStore("pos", () => {
 		await loadPermissions(useAuthStore().userName, name);
 	});
 
-	const currencySymbol = computed(() => {
-		if (window.xpos) {
-			const _currency = (xpos as any).boot?.currencies?.find(
-				(c: any) => c.name === posProfile.value?.currency,
-			);
-			if (_currency) {
-				return _currency.symbol || _currency.name;
-			}
-			return currency.value || "$";
-		}
-		return "$";
-	});
+	const currencySymbol = computed(() => symbolFor(currency.value) || currency.value || "$");
+
+	const invoiceCurrency = computed(
+		() => posProfile.value?.currency || company.value?.default_currency || "",
+	);
 
 	const paymentMethods = computed(() => {
 		if (!posProfile.value?.payments) return [];
 		return posProfile.value.payments.map((p) => ({
 			mode_of_payment: p.mode_of_payment,
 			default: p.default,
+			pos_tender_currency: p.pos_tender_currency || invoiceCurrency.value,
+			type: p.type || "",
+			is_foreign_tender: !!p.is_foreign_tender,
+			takes_reference: !!p.takes_reference,
+			requires_reference: !!p.requires_reference,
+			exchange_rate: p.exchange_rate ?? 1,
+			rate_date: p.rate_date || "",
 		}));
 	});
+
+	const foreignTenderModes = computed(() => paymentMethods.value.filter((m) => m.is_foreign_tender));
+
+	const cashTenderModes = computed(() => paymentMethods.value.filter((m) => m.type === "Cash"));
+
+	const allowMixedCurrencyTender = computed(
+		() => !!posProfile.value?.pos_mixed_currency_tender && foreignTenderModes.value.length > 0,
+	);
+
+	function tenderModeFor(modeOfPayment: string) {
+		return paymentMethods.value.find((m) => m.mode_of_payment === modeOfPayment);
+	}
+
+	function tenderRateFor(modeOfPayment: string): number {
+		return tenderModeFor(modeOfPayment)?.exchange_rate ?? 1;
+	}
+
+	function tenderCurrencyFor(modeOfPayment: string): string {
+		return tenderModeFor(modeOfPayment)?.pos_tender_currency || invoiceCurrency.value;
+	}
 
 	const companyName = computed(() => company.value?.name || "");
 
@@ -101,7 +123,7 @@ export const usePosStore = defineStore("pos", () => {
 
 	const allowChangePostingDate = computed(() => !!posProfile.value?.allow_change_posting_date);
 
-	const displayItemsInStock = computed(() => !!posProfile.value?.display_items_in_stock);
+	const showCustomerBalance = computed(() => !!posProfile.value?.show_customer_balance);
 
 	const allowPartialPayment = computed(() => !!posProfile.value?.allow_partial_payment);
 
@@ -117,11 +139,27 @@ export const usePosStore = defineStore("pos", () => {
 
 	const displayAdditionalNotes = computed(() => !!posProfile.value?.display_additional_notes);
 
+	const allowedSalesPersons = computed(() =>
+		(posProfile.value?.allowed_sales_persons ?? []).map((row) => row.sales_person).filter(Boolean),
+	);
+
+	const salesPersonEnabled = computed(() => allowedSalesPersons.value.length > 0);
+
 	const allowWriteOffChange = computed(() => !!posProfile.value?.allow_write_off_change);
 
 	const displayItemCode = computed(() => !!posProfile.value?.display_item_code);
 
 	const allowZeroRatedItems = computed(() => !!posProfile.value?.allow_zero_rated_items);
+
+	const useDeliveryCharges = computed(() => !!posProfile.value?.use_delivery_charges);
+
+	const autoSetDeliveryCharges = computed(
+		() => useDeliveryCharges.value && !!posProfile.value?.auto_set_delivery_charges,
+	);
+
+	const forcePriceFromCustomerPriceList = computed(
+		() => !!posProfile.value?.force_price_from_customer_price_list,
+	);
 
 	const maxDiscountAllowed = computed(() => posProfile.value?.max_discount_percentage_allowed || 0);
 
@@ -139,13 +177,13 @@ export const usePosStore = defineStore("pos", () => {
 
 	const fetchCoupon = computed(() => !!posProfile.value?.auto_fetch_coupons_gifts);
 
+	const allowCouponEntry = computed(() => !!posProfile.value?.allow_coupon_entry);
+
 	const showTemplateItems = computed(() => !!posProfile.value?.show_template_items);
 
 	const hideVariantsItems = computed(() => !!posProfile.value?.hide_variants_items);
 
 	const autoSetBatch = computed(() => !!posProfile.value?.auto_set_batch);
-
-	const searchSerialNo = computed(() => !!posProfile.value?.search_serial_no);
 
 	const enableReturnValidity = computed(() => !!posProfile.value?.enable_return_validity);
 
@@ -169,6 +207,10 @@ export const usePosStore = defineStore("pos", () => {
 
 	const cashModeOfPayment = computed(() => posProfile.value?.cash_mode_of_payment || "Cash");
 
+	/** Gift cards are online-only, so the desktop app (which queues every sale locally) never offers them. */
+	const giftCards = computed(() => (isElectron() ? null : giftCardConfig.value));
+	const giftCardMode = computed(() => giftCards.value?.mode_of_payment || "");
+
 	const purchaseTaxes = computed(() => posProfile.value?.purchase_taxes || []);
 
 	function clearShiftState(): void {
@@ -179,6 +221,7 @@ export const usePosStore = defineStore("pos", () => {
 		taxes.value = [];
 		taxInclusiveMode.value = false;
 		disableRoundedTotal.value = false;
+		giftCardConfig.value = null;
 		printSettings.value = null;
 		isReady.value = false;
 		isCashier.value = true;
@@ -194,6 +237,7 @@ export const usePosStore = defineStore("pos", () => {
 		taxes.value = result.taxes || [];
 		taxInclusiveMode.value = !!result.tax_inclusive;
 		disableRoundedTotal.value = !!result.disable_rounded_total;
+		giftCardConfig.value = result.gift_cards || null;
 		printSettings.value = result.print_settings || null;
 		isCashier.value = result.is_cashier ?? true;
 		showOpeningDialog.value = false;
@@ -266,6 +310,7 @@ export const usePosStore = defineStore("pos", () => {
 				});
 
 				if (result.pos_profile?.use_offline_mode) {
+					refreshReceiptContext(result.pos_profile.name);
 					try {
 						await cachePOSData(result);
 
@@ -355,6 +400,7 @@ export const usePosStore = defineStore("pos", () => {
 				taxes.value = result.taxes || [];
 				taxInclusiveMode.value = !!result.tax_inclusive;
 				disableRoundedTotal.value = !!result.disable_rounded_total;
+				giftCardConfig.value = result.gift_cards || null;
 				printSettings.value = result.print_settings || null;
 				showOpeningDialog.value = false;
 				isReady.value = true;
@@ -375,6 +421,7 @@ export const usePosStore = defineStore("pos", () => {
 			taxInclusiveMode.value = !!result.tax_inclusive;
 
 			disableRoundedTotal.value = !!result.disable_rounded_total;
+			giftCardConfig.value = result.gift_cards || null;
 
 			printSettings.value = result.print_settings || null;
 			showOpeningDialog.value = false;
@@ -421,11 +468,9 @@ export const usePosStore = defineStore("pos", () => {
 	async function fetchClosingData(): Promise<ShiftSummary | undefined> {
 		if (!posOpeningShift.value?.name) return;
 		try {
-			const data = await call<ShiftSummary>("xpos.api.shifts.get_shift_summary", {
+			return await call<ShiftSummary>("xpos.api.shifts.get_shift_summary", {
 				opening_shift: posOpeningShift.value.name,
 			});
-			closingData.value = data;
-			return data;
 		} catch (error) {
 			console.error("Error fetching closing data:", error);
 			throw error;
@@ -475,8 +520,10 @@ export const usePosStore = defineStore("pos", () => {
 		}
 	}
 
+	/** Cache the receipt layout so a sale made offline can still be printed. */
 	async function refreshReceiptContext(profileName: string): Promise<void> {
-		if (!isElectron() || !isOnline() || !profileName) return;
+		if (!isOnline() || !profileName) return;
+		if (!isElectron() && !useOfflineMode.value) return;
 		try {
 			const ctx = await call<ReceiptContext>("xpos.api.print_formats.get_receipt_context", {
 				pos_profile: profileName,
@@ -504,7 +551,6 @@ export const usePosStore = defineStore("pos", () => {
 		showOpeningDialog,
 		openingData,
 		showClosingDialog,
-		closingData,
 		printFormats,
 		lastInvoiceName,
 		invoiceType,
@@ -514,12 +560,19 @@ export const usePosStore = defineStore("pos", () => {
 		warehouse,
 		currency,
 		currencySymbol,
+		invoiceCurrency,
 		paymentMethods,
+		foreignTenderModes,
+		cashTenderModes,
+		allowMixedCurrencyTender,
+		tenderModeFor,
+		tenderRateFor,
+		tenderCurrencyFor,
 		companyName,
 		sellingPriceList,
 		defaultCustomer,
 		allowChangePostingDate,
-		displayItemsInStock,
+		showCustomerBalance,
 		allowPartialPayment,
 		allowCreditSale,
 		allowReturn,
@@ -527,9 +580,14 @@ export const usePosStore = defineStore("pos", () => {
 		allowSalesOrder,
 		allowDeleteOfflineInvoice,
 		displayAdditionalNotes,
+		allowedSalesPersons,
+		salesPersonEnabled,
 		allowWriteOffChange,
 		displayItemCode,
 		allowZeroRatedItems,
+		forcePriceFromCustomerPriceList,
+		useDeliveryCharges,
+		autoSetDeliveryCharges,
 		maxDiscountAllowed,
 		inputQty,
 		taxInclusive,
@@ -538,10 +596,10 @@ export const usePosStore = defineStore("pos", () => {
 		allowPosExpense,
 		allowCashDeposit,
 		fetchCoupon,
+		allowCouponEntry,
 		showTemplateItems,
 		hideVariantsItems,
 		autoSetBatch,
-		searchSerialNo,
 		enableReturnValidity,
 		returnValidityDays,
 		useCustomerCredit,
@@ -551,6 +609,8 @@ export const usePosStore = defineStore("pos", () => {
 		allowOutstandingSettlement,
 		printBackupReceipt,
 		cashModeOfPayment,
+		giftCards,
+		giftCardMode,
 		purchaseTaxes,
 		hideImages,
 		hideUnavailableItems,

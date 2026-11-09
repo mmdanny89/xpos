@@ -1,5 +1,8 @@
 import Dexie, { type Table } from "dexie";
 import type { POSItem, ItemGroup, Customer } from "@/types/pos.types";
+import { sanitizeForIdb } from "./idbSanitize";
+
+export { sanitizeForIdb };
 
 const DB_NAME = "xpos_offline_v3";
 
@@ -16,66 +19,22 @@ function isRecoverableDbError(error: unknown): boolean {
 	);
 }
 
-function sanitizeForIdb<T>(value: T): T {
-	const visited = new WeakMap<object, unknown>();
-
-	const walk = (input: unknown): unknown => {
-		if (input === null || input === undefined) return input;
-
-		const inputType = typeof input;
-		if (inputType === "string" || inputType === "number" || inputType === "boolean") {
-			return input;
-		}
-
-		if (inputType === "bigint") return input.toString();
-		if (inputType === "function" || inputType === "symbol") return undefined;
-
-		if (input instanceof Date) return input.toISOString();
-
-		if (Array.isArray(input)) {
-			const result: unknown[] = [];
-			for (const entry of input) {
-				const safeEntry = walk(entry);
-				if (safeEntry !== undefined) result.push(safeEntry);
-			}
-			return result;
-		}
-
-		if (inputType === "object") {
-			const objectInput = input as Record<string, unknown>;
-			if (visited.has(objectInput)) {
-				return visited.get(objectInput);
-			}
-
-			const result: Record<string, unknown> = {};
-			visited.set(objectInput, result);
-
-			for (const [key, val] of Object.entries(objectInput)) {
-				const safeVal = walk(val);
-				if (safeVal !== undefined) {
-					result[key] = safeVal;
-				}
-			}
-
-			return result;
-		}
-
-		return input;
-	};
-
-	return walk(value) as T;
-}
-
 export interface PendingInvoice {
 	id?: number;
 	local_id?: string;
 	data: unknown;
-	status: "pending" | "syncing" | "failed" | "dead_letter";
+	status: "pending" | "syncing" | "failed" | "dead_letter" | "needs_review" | "fiscal_uncertain";
 	created_at: string;
 	error?: string;
 	retry_count: number;
 	customer_name?: string;
 	grand_total?: number;
+	/** What the till printed. Kept beside `data`, so it is never sent to the server. */
+	receipt?: import("@/types/pos.types").ReceiptSnapshot;
+	/** The server's new prices when it refused to post this sale at the captured ones. */
+	review?: import("@/types/pos.types").RepriceResponse;
+	/** The server draft whose FBR outcome is unknown and must be checked before it is finished. */
+	fiscal?: { name?: string | null; doctype?: string; usin?: string; pos_profile?: string };
 }
 
 export interface StockEntry {
@@ -252,7 +211,13 @@ export async function getCachedItemByCode(itemCode: string): Promise<POSItem | u
 	return db.items.get(itemCode);
 }
 
-export async function searchCachedItems(term: string, group: string): Promise<POSItem[]> {
+const DEFAULT_CACHED_SEARCH_FIELDS = ["item_code", "item_name", "local_item_name", "description"];
+
+export async function searchCachedItems(
+	term: string,
+	group: string,
+	searchFields?: string[],
+): Promise<POSItem[]> {
 	let results: POSItem[];
 
 	if (group && group !== "All Item Groups") {
@@ -263,14 +228,17 @@ export async function searchCachedItems(term: string, group: string): Promise<PO
 
 	if (term) {
 		const lower = term.toLowerCase();
-		results = results.filter(
-			(i) =>
-				i.item_code.toLowerCase().includes(lower) ||
-				i.item_name.toLowerCase().includes(lower) ||
-				(i.local_item_name && i.local_item_name.toLowerCase().includes(lower)) ||
-				(i.barcode && i.barcode.toLowerCase().includes(lower)) ||
-				(i.description && i.description.toLowerCase().includes(lower)),
+		const fields = (searchFields?.length ? searchFields : DEFAULT_CACHED_SEARCH_FIELDS).map((f) =>
+			f === "name" ? "item_code" : f,
 		);
+		results = results.filter((item) => {
+			const record = item as unknown as Record<string, unknown>;
+			const matchesField = fields.some((field) => {
+				const value = record[field];
+				return typeof value === "string" && value.toLowerCase().includes(lower);
+			});
+			return matchesField || (!!item.barcode && item.barcode.toLowerCase().includes(lower));
+		});
 	}
 
 	return results;

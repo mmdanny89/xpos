@@ -1,5 +1,6 @@
 import { isElectron } from "./electronBridge";
 import type { PendingPurchase } from "./idbService";
+import { sanitizeForIdb } from "./idbSanitize";
 
 function getDb() {
 	return window.electronAPI!.db;
@@ -207,21 +208,33 @@ export async function addPendingInvoice(record: {
 	data: unknown;
 	customer_name?: string;
 	grand_total?: number;
+	receipt?: import("@/types/pos.types").ReceiptSnapshot;
 }) {
+	// The cart hands over live Vue arrays (payments, change legs); IndexedDB and IPC can only
+	// store plain data and throw DataCloneError otherwise.
+	record = sanitizeForIdb(record);
 	if (isElectron()) {
 		return getDb().addPendingInvoice(record);
 	}
 	const { db } = await import("./idbService");
-	const localId = `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-	const id = await db.table("pendingInvoices").add({
-		local_id: localId,
-		data: record.data,
-		status: "pending",
-		customer_name: record.customer_name,
-		grand_total: record.grand_total,
-		created_at: new Date().toISOString(),
+	const data = record.data as Record<string, unknown>;
+	const localId = String(data.local_id || `inv_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+	const table = db.table("pendingInvoices");
+	return db.transaction("rw", table, async () => {
+		const existing = await table.filter((row) => row.local_id === localId).first();
+		if (existing) {
+			if (JSON.stringify(existing.data) !== JSON.stringify(record.data)) {
+				throw new Error("This sale is awaiting confirmation. Retry the original sale from Pending Invoices before changing it.");
+			}
+			return { id: existing.id as number, local_id: localId };
+		}
+		const id = await table.add({
+			local_id: localId, data: record.data, status: "pending",
+			customer_name: record.customer_name, grand_total: record.grand_total,
+			receipt: record.receipt, created_at: new Date().toISOString(),
+		});
+		return { id: id as number, local_id: localId };
 	});
-	return { id: id as number, local_id: localId };
 }
 
 export async function getPendingInvoices(status?: string) {
@@ -268,6 +281,7 @@ export async function addPendingPurchase(record: {
 	supplier_name?: string;
 	grand_total?: number;
 }) {
+	record = sanitizeForIdb(record);
 	if (isElectron()) {
 		return getDb().addPendingPurchase(record);
 	}
@@ -812,15 +826,20 @@ export async function getCachedItemByCode(itemCode: string): Promise<POSItem | u
 	return idb.getCachedItemByCode(itemCode);
 }
 
-export async function searchCachedItems(term: string, group: string): Promise<POSItem[]> {
+export async function searchCachedItems(
+	term: string,
+	group: string,
+	searchFields?: string[],
+): Promise<POSItem[]> {
 	if (isElectron()) {
 		return (await getDb().getItems({
 			search: term || undefined,
+			searchFields,
 			group: group && group !== "All Item Groups" ? group : undefined,
 		})) as unknown as POSItem[];
 	}
 	const idb = await import("./idbService");
-	return idb.searchCachedItems(term, group);
+	return idb.searchCachedItems(term, group, searchFields);
 }
 
 export async function cacheItemGroups(groups: ItemGroup[], parentGroups: ItemGroup[]): Promise<void> {
@@ -1153,6 +1172,34 @@ export async function getCachedCurrencies(): Promise<string[]> {
 	}
 	const idb = await import("./idbService");
 	return idb.getCachedCurrencies();
+}
+
+export interface CachedCurrencyMeta {
+	name: string;
+	symbol?: string;
+	number_format?: string;
+	smallest_currency_fraction_value?: number;
+	symbol_on_right?: number;
+}
+
+export async function cacheCurrencyMeta(currencies: CachedCurrencyMeta[]): Promise<void> {
+	if (isElectron()) {
+		await getDb().setMeta("currency_meta", JSON.stringify(currencies));
+		return;
+	}
+	const idb = await import("./idbService");
+	await idb.setMeta("currency_meta", currencies);
+}
+
+export async function getCachedCurrencyMeta(): Promise<CachedCurrencyMeta[]> {
+	if (isElectron()) {
+		const rows = (await getDb().getCurrencies()) as unknown as CachedCurrencyMeta[] | undefined;
+		if (rows?.length) return rows;
+		const val = await getDb().getMeta("currency_meta");
+		return val ? JSON.parse(val) : [];
+	}
+	const idb = await import("./idbService");
+	return ((await idb.getMeta("currency_meta")) as CachedCurrencyMeta[]) || [];
 }
 
 export async function cacheLanguages(languages: string[]): Promise<void> {

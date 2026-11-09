@@ -1,5 +1,6 @@
 export interface POSSearchField {
 	field: string;
+	fieldname?: string;
 	[key: string]: unknown;
 }
 
@@ -14,8 +15,18 @@ export interface POSAdditionalField {
 export interface POSSettings {
 	invoice_type: string;
 	post_change_gl_entries: boolean;
-	invoice_fields: POSAdditionalField[];
-	pos_search_fields: POSSearchField[];
+	invoice_fields?: POSAdditionalField[];
+	pos_search_fields?: POSSearchField[];
+	item_search_limit?: number;
+	search_serial_no?: number;
+	search_batch_no?: number;
+}
+
+export interface ItemSearchSettings {
+	fields: string[];
+	item_search_limit: number;
+	search_serial_no: number;
+	search_batch_no: number;
 }
 
 export interface POSProfile {
@@ -24,13 +35,14 @@ export interface POSProfile {
 	currency: string;
 	company: string;
 	payments: POSPaymentMethod[];
+	pos_mixed_currency_tender?: boolean;
 	taxes_and_charges?: string;
 	write_off_account?: string;
 	write_off_cost_center?: string;
 	selling_price_list?: string;
 	default_customer?: string;
 	allow_change_posting_date?: boolean;
-	display_items_in_stock?: boolean;
+	show_customer_balance?: boolean;
 	allow_partial_payment?: boolean;
 	allow_credit_sale?: boolean;
 	allow_return?: boolean;
@@ -47,7 +59,6 @@ export interface POSProfile {
 	allow_outstanding_settlement?: boolean;
 	print_backup_receipt?: boolean;
 	auto_set_batch?: boolean;
-	search_serial_no?: boolean;
 	tax_inclusive?: boolean;
 	default_view?: string;
 	default_sales_order?: boolean;
@@ -59,12 +70,20 @@ export interface POSProfile {
 	allow_cash_deposit?: boolean;
 	max_discount_percentage_allowed?: number;
 	auto_fetch_coupons_gifts?: boolean;
+	allow_coupon_entry?: boolean;
 	hide_closing_shift?: boolean;
 	use_offline_mode?: boolean;
 	cash_mode_of_payment?: string;
 	use_customer_credit?: boolean;
 	use_cashback?: boolean;
 	apply_customer_discount?: boolean;
+	force_price_from_customer_price_list?: boolean;
+	use_delivery_charges?: boolean;
+	auto_set_delivery_charges?: boolean;
+	hide_expected_amount?: boolean;
+	auto_create_referral_for_new_customers?: boolean;
+	default_purchase_uom?: string;
+	print_format_rules?: { customer_group: string; print_format: string }[];
 	show_template_items?: boolean;
 	hide_variants_items?: boolean;
 	hide_unavailable_items?: boolean;
@@ -73,6 +92,7 @@ export interface POSProfile {
 	back_office_cash_account?: string;
 	block_sale_beyond_available_qty?: boolean;
 	purchase_taxes?: PurchaseTaxEntry[];
+	allowed_sales_persons?: { sales_person: string }[];
 	[key: string]: any;
 }
 
@@ -86,6 +106,15 @@ export interface POSPaymentMethod {
 	mode_of_payment: string;
 	default?: boolean;
 	amount?: number;
+	pos_tender_currency?: string;
+	type?: string;
+	is_foreign_tender?: boolean;
+	takes_reference?: boolean;
+	requires_reference?: boolean;
+	exchange_rate?: number;
+	rate_date?: string;
+	precision?: number;
+	symbol?: string;
 }
 
 export interface Company {
@@ -166,9 +195,12 @@ export interface POSItem {
 	barcode?: string;
 	item_tax_template?: string;
 	is_stock_item?: boolean;
+	allow_negative_stock?: boolean | number;
 	has_variants?: boolean;
 	variant_of?: string;
 	is_template?: boolean;
+	qty?: number;
+	is_scale_barcode?: boolean;
 	[key: string]: unknown;
 }
 
@@ -188,8 +220,18 @@ export interface CartItem extends POSItem {
 	uid?: string;
 	pos_pricing_rules?: string[];
 	pos_rate_overridden?: boolean;
+	pos_price_key?: string;
+	pos_price_unavailable?: boolean;
+	/** Why the price is unavailable: offline without this customer's prices, or no price configured. */
+	pos_price_state?: "needs_connection" | "no_price";
+	/** Net rate the cashier last saw, when the server repriced this line. */
+	pos_repriced_from?: number;
 	pos_is_free_item?: boolean;
 	pos_free_item_rule?: string;
+	/** A stored-value gift card being sold, not a stock item. */
+	gift_card_issue?: boolean;
+	/** On a return: the card sold on the original line. */
+	gift_card?: string;
 }
 
 export interface ItemGroup {
@@ -253,7 +295,7 @@ export interface Customer {
 	mobile_no?: string;
 	email_id?: string;
 	customer_type?: string;
-	loyalty_program?: string;
+	loyalty_program?: { name?: string; loyalty_points?: number; conversion_factor?: number };
 	loyalty_points?: number;
 	loyalty_amount?: number;
 	discount?: number;
@@ -262,6 +304,8 @@ export interface Customer {
 	default_price_list?: string;
 	gender?: string;
 	tax_id?: string;
+	balance?: number;
+	credit_limit?: number;
 	[key: string]: unknown;
 }
 
@@ -279,10 +323,17 @@ export interface CustomerAddress {
 	is_shipping_address?: boolean;
 }
 
+export interface CustomerCreditSource {
+	source_type: "Payment Entry" | "Sales Invoice";
+	source_name: string;
+	posting_date?: string;
+	available: number;
+}
+
 export interface CustomerCredit {
 	total_credit: number;
-	credit_notes: CreditNote[];
-	unallocated_payments: UnallocatedPayment[];
+	currency?: string | null;
+	sources: CustomerCreditSource[];
 	loyalty_points?: number;
 	loyalty_amount?: number;
 }
@@ -359,6 +410,8 @@ export interface InvoiceItem {
 	is_replace?: boolean;
 	is_free_item?: number;
 	pricing_rules?: string;
+	gift_card_issue?: number;
+	gift_card?: string;
 }
 
 export interface InvoicePayment {
@@ -367,9 +420,64 @@ export interface InvoicePayment {
 	base_amount?: number;
 	account?: string;
 	type?: string;
+	pos_tender_currency?: string;
+	pos_tender_amount?: number;
+	pos_exchange_rate?: number;
+	/** Token from a live balance check; the server turns it back into the card. */
+	gift_card_auth?: string;
+	/** On a return: the card that paid the original sale, refunded here. */
+	gift_card?: string;
+	reference_no?: string;
+}
+
+export interface TenderLeg {
+	id: string;
+	mode_of_payment: string;
+	currency: string;
+	native_amount: number;
+	exchange_rate: number;
+	base_amount: number;
+	gift_card?: string;
+	gift_card_auth?: string;
+	masked_code?: string;
+	reference_no?: string;
+}
+
+export interface GiftCardCheck {
+	gift_card: string;
+	masked_code: string;
+	balance: number;
+	currency: string;
+	valid_upto?: string | null;
+	mode_of_payment: string;
+	auth: string;
+}
+
+export interface IssuedGiftCard {
+	gift_card: string;
+	code: string;
+	masked_code: string;
+	amount: number;
+	currency: string;
+	valid_upto?: string | null;
+}
+
+export interface GiftCardRefund {
+	gift_card: string;
+	masked_code: string;
+	amount: number;
+}
+
+export interface InvoiceChangeLeg {
+	mode_of_payment: string;
+	currency: string;
+	amount: number;
+	base_amount: number;
+	exchange_rate: number;
 }
 
 export interface InvoiceData {
+	local_id?: string;
 	name?: string;
 	modified?: string;
 	doctype?: string;
@@ -379,6 +487,8 @@ export interface InvoiceData {
 	posting_date?: string;
 	additional_discount_percentage?: number;
 	discount_amount?: number;
+	customer_credit?: { source_type: string; source_name: string; amount: number }[];
+	discount_source?: "customer";
 	apply_discount_on?: string;
 	payments?: InvoicePayment[];
 	pos_notes?: string;
@@ -397,6 +507,7 @@ export interface InvoiceData {
 	write_off_amount?: number;
 	write_off_account?: string;
 	change_amount?: number;
+	pos_change_legs?: InvoiceChangeLeg[];
 	currency?: string;
 	conversion_rate?: number;
 	is_credit_sale?: boolean;
@@ -694,6 +805,10 @@ export interface ReceiptSnapshotTax {
 export interface ReceiptSnapshotPayment {
 	mode_of_payment: string;
 	amount: number;
+	currency?: string;
+	native_amount?: number;
+	exchange_rate?: number;
+	rate_date?: string;
 }
 
 export interface ReceiptSnapshot {
@@ -712,6 +827,8 @@ export interface ReceiptSnapshot {
 	grand_total: number;
 	total_qty: number;
 	change: number;
+	change_legs?: InvoiceChangeLeg[];
+	currency?: string;
 	notes?: string;
 }
 
@@ -725,6 +842,14 @@ export interface ShiftCheckResult {
 	print_settings?: PrintSettings;
 	disable_rounded_total?: number;
 	is_cashier?: boolean;
+	gift_cards?: GiftCardConfig | null;
+}
+
+export interface GiftCardConfig {
+	mode_of_payment: string;
+	item: string;
+	min_amount: number;
+	max_amount: number;
 }
 
 export interface OpeningData {
@@ -733,13 +858,19 @@ export interface OpeningData {
 	payment_methods: POSPaymentMethod[];
 }
 
+export interface ShiftModeTotal {
+	amount: number;
+	currency: string;
+}
+
 export interface ShiftSummary {
 	net_total: number;
 	grand_total: number;
 	total_invoices: number;
 	returns_count: number;
-	payment_summary: Record<string, number>;
-	opening_balances: Record<string, number>;
+	payment_summary: Record<string, ShiftModeTotal>;
+	opening_balances: Record<string, ShiftModeTotal>;
+	expected_amounts: Record<string, ShiftModeTotal>;
 	tax_summary: POSClosingShiftTax[];
 	pos_profile: string;
 	company: string;
@@ -919,6 +1050,7 @@ export interface SearchItem {
 	item_name: string;
 	local_item_name?: string;
 	stock_uom: string;
+	purchase_uom?: string;
 	item_uoms?: ItemUOMDetail[];
 	standard_rate?: number;
 	selling_price?: number;
@@ -1122,13 +1254,25 @@ export interface CurrencyPrecision {
 	[key: string]: unknown;
 }
 
+export interface NumberFormatSettings {
+	number_format: string;
+	float_precision: number | string;
+	currency_precision: number | string;
+	use_number_format_from_currency: number | boolean;
+	hide_currency_symbol: number | boolean | string;
+	[key: string]: unknown;
+}
+
 export interface ERPSettings {
 	selling_settings: SellingSettings;
 	buying_settings: BuyingSettings;
 	stock_settings: ERPStockSettings;
 	accounts_settings: AccountsSettings;
+	pos_settings: POSSettings;
+	item_search: ItemSearchSettings;
 	global_defaults: GlobalDefaults;
 	currency_precision: CurrencyPrecision;
+	number_format: NumberFormatSettings;
 }
 
 export const DOCSTATUS_MAP: Record<number, string> = {
@@ -1136,3 +1280,29 @@ export const DOCSTATUS_MAP: Record<number, string> = {
 	1: "Submitted",
 	2: "Cancelled",
 };
+
+/** create_invoice answer when ERPNext's prices differ from what the cashier took payment for. */
+export interface RepriceLine {
+	row_id?: string;
+	index: number;
+	item_code: string;
+	quoted_rate: number;
+	rate: number | null;
+	price_list_rate: number | null;
+	discount_percentage: number | null;
+	discount_amount: number | null;
+}
+
+export interface RepriceResponse {
+	status: "reprice_required";
+	price_list?: string;
+	lines: RepriceLine[];
+	additional_discount_percentage: number;
+	discount_amount: number;
+	discount_changed: boolean;
+	/** A pricing rule set the invoice discount on a sale that has POS Offer discounts. */
+	offer_conflict?: boolean;
+	grand_total: number;
+	rounded_total: number;
+	message: string;
+}

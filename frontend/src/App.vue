@@ -54,6 +54,7 @@
 				:default-recipient="emailComposerProps.defaultRecipient"
 				:default-subject="emailComposerProps.defaultSubject"
 			/>
+			<GiftCardIssuedDialog v-if="cartStore.issuedGiftCards.length" />
 
 			<CustomerSelect v-if="customerStore.showCustomerDialog" />
 
@@ -67,6 +68,17 @@
 
 			<KeyboardShortcutsDialog :open="showShortcutsDialog" @close="showShortcutsDialog = false" />
 			<AboutDialog :open="showAboutDialog" @close="showAboutDialog = false" />
+
+			<ConfirmDialog
+				:open="showClearCartConfirm"
+				:title="__('Clear cart?')"
+				:description="__('All items and order details for this order will be lost.')"
+				:confirm-label="__('Clear Cart')"
+				variant="destructive"
+				:icon="Trash2"
+				@confirm="confirmClearCart"
+				@cancel="showClearCartConfirm = false"
+			/>
 		</template>
 
 		<Toaster
@@ -83,7 +95,7 @@
 			<button
 				v-if="!isAuthPage && errorCount > 0 && !showErrorInspector"
 				type="button"
-				class="fixed bottom-3 end-3 z-50 flex items-center gap-1.5 rounded-full bg-destructive px-3 py-1 text-xs font-medium text-destructive-foreground shadow-md select-none cursor-pointer"
+				class="fixed bottom-3 inset-e-3 z-50 flex items-center gap-1.5 rounded-full bg-destructive px-3 py-1 text-xs font-medium text-destructive-foreground shadow-md select-none cursor-pointer"
 				:title="__('Open Error Inspector')"
 				@click="showErrorInspector = true"
 			>
@@ -107,7 +119,7 @@
 			>
 				<button
 					type="button"
-					class="fixed bottom-3 start-3 z-50 flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium shadow-md select-none cursor-pointer"
+					class="fixed bottom-3 inset-s-3 z-50 flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium shadow-md select-none cursor-pointer"
 					:class="
 						syncStatus.isSyncing.value
 							? 'bg-blue-600 text-white'
@@ -168,6 +180,7 @@ import OpeningDialog from "@/components/dialogs/OpeningDialog.vue";
 import ClosingDialog from "@/components/dialogs/ClosingDialog.vue";
 import PaymentDialog from "@/components/dialogs/PaymentDialog.vue";
 import CommunicationComposer from "@/components/dialogs/CommunicationComposer.vue";
+import GiftCardIssuedDialog from "@/components/dialogs/GiftCardIssuedDialog.vue";
 import CustomerSelect from "@/components/customer/CustomerSelect.vue";
 import LoyaltyDialog from "@/components/dialogs/LoyaltyDialog.vue";
 import ItemDetailDialog from "@/components/dialogs/ItemDetailDialog.vue";
@@ -175,10 +188,11 @@ import CashMovementDialog from "@/components/dialogs/CashMovementDialog.vue";
 import DraftInvoiceDialog from "@/components/dialogs/DraftInvoiceDialog.vue";
 import KeyboardShortcutsDialog from "@/components/dialogs/KeyboardShortcutsDialog.vue";
 import AboutDialog from "@/components/dialogs/AboutDialog.vue";
+import ConfirmDialog from "@/components/dialogs/ConfirmDialog.vue";
 import SplashScreen from "@/components/SplashScreen.vue";
 import { useBranding } from "@/composables/useBranding";
 import { TooltipWrapper } from "@/components/ui/tooltip";
-import { AlertTriangle } from "lucide-vue-next";
+import { AlertTriangle, Trash2 } from "lucide-vue-next";
 import { useOfflineStore } from "@/stores/offlineStore";
 import { initSyncListeners } from "@/services/syncIpcHandler";
 import { showError } from "@/services/api";
@@ -188,11 +202,12 @@ import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
 import { isElectron } from "@/services/electronBridge";
 import ErrorInspector from "@/components/errors/ErrorInspector.vue";
 import { unseenCount as errorUnseenCount } from "@/services/errorLog";
-import { get_full_url } from "@/utils";
+import { usePrintInvoice } from "@/composables/usePrintInvoice";
 import { getCustomer } from "./utils";
 
 const route = useRoute();
 const posStore = usePosStore();
+const { openInvoicePrintView } = usePrintInvoice();
 const cartStore = useCartStore();
 const customerStore = useCustomerStore();
 const itemStore = useItemStore();
@@ -218,7 +233,22 @@ const {
 const isAuthPage = computed(() => route.meta.isAuthPage === true || route.meta.isSetupPage === true);
 const isFullScreen = computed(() => route.meta.fullScreen === true);
 
-async function handleClearCart() {
+const showClearCartConfirm = ref(false);
+
+function handleClearCart() {
+	if (!cartStore.isEmpty) {
+		showClearCartConfirm.value = true;
+		return;
+	}
+	doClearCart();
+}
+
+function confirmClearCart() {
+	showClearCartConfirm.value = false;
+	doClearCart();
+}
+
+async function doClearCart() {
 	cartStore.clearCart();
 	if (!cartStore.customer && posStore.defaultCustomer) {
 		const customer = await getCustomer(posStore.defaultCustomer);
@@ -295,12 +325,7 @@ function handleCashDeposit() {
 function handlePrintLast() {
 	const name = posStore.lastInvoiceName;
 	if (!name) return;
-	window.open(
-		get_full_url(
-			`/printview?doctype=${posStore.invoiceType}&name=${name}&format=${posStore.defaultPrintFormat}&no_letterhead=0&trigger_print=1`,
-		),
-		"_blank",
-	);
+	void openInvoicePrintView(name);
 }
 
 function handleShowShortcutsDialog() {

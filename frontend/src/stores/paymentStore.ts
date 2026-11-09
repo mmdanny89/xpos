@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { call } from "@/services/api";
+import { usePosStore } from "@/stores/posStore";
 import type {
 	OutstandingInvoice,
 	UnallocatedPayment,
@@ -25,6 +26,7 @@ export const usePaymentStore = defineStore("payment", () => {
 			const result = await call<CustomerCredit>("xpos.api.customers.get_customer_credit", {
 				customer,
 				company: company || "",
+				pos_profile: usePosStore().profileName || undefined,
 			});
 			availableCredit.value = result;
 			return result;
@@ -65,16 +67,6 @@ export const usePaymentStore = defineStore("payment", () => {
 		} catch (error) {
 			console.error("Error fetching unallocated payments:", error);
 			return [];
-		}
-	}
-
-	async function createPaymentEntry(data: Record<string, unknown>): Promise<unknown> {
-		try {
-			const result = await call("xpos.api.payments.create_payment_entry", data);
-			return result;
-		} catch (error) {
-			console.error("Error creating payment entry:", error);
-			throw error;
 		}
 	}
 
@@ -184,7 +176,6 @@ export const usePaymentStore = defineStore("payment", () => {
 		fetchAvailableCredit,
 		fetchOutstandingInvoices,
 		fetchUnallocatedPayments,
-		createPaymentEntry,
 		createPaymentRequest,
 		clearCredit,
 		// Cash Movements

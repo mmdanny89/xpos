@@ -13,7 +13,7 @@
 			>
 				<div class="flex items-center gap-3">
 					<div
-						class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-sm"
+						class="w-8 h-8 rounded-lg bg-linear-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-sm"
 					>
 						<Wallet class="w-4 h-4 text-white" />
 					</div>
@@ -33,15 +33,13 @@
 							v-if="customerBalance > 0"
 							class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 font-medium"
 						>
-							{{ __("Outstanding") }}: {{ posStore.currencySymbol
-							}}{{ formatPrice(customerBalance) }}
+							{{ __("Outstanding") }}: {{ money(customerBalance) }}
 						</span>
 						<span
 							v-if="customerCreditLimit > 0"
 							class="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 font-medium"
 						>
-							{{ __("Credit Limit") }}: {{ posStore.currencySymbol
-							}}{{ formatPrice(customerCreditLimit) }}
+							{{ __("Credit Limit") }}: {{ money(customerCreditLimit) }}
 						</span>
 					</div>
 					<Badge v-if="cartStore.isReturnMode" variant="warning" class="text-[10px]">
@@ -78,7 +76,7 @@
 								class="text-3xl font-extrabold tabular-nums"
 								:class="cartStore.isReturnMode ? 'text-amber-600' : 'text-primary'"
 							>
-								{{ posStore.currencySymbol }}{{ formatPrice(Math.abs(cartStore.grandTotal)) }}
+								{{ money(Math.abs(cartStore.grandTotal)) }}
 							</p>
 						</div>
 						<div
@@ -92,9 +90,7 @@
 						>
 							<div class="flex items-center justify-between text-xs text-muted-foreground mb-1">
 								<span>{{ __("Subtotal") }}</span>
-								<span
-									>{{ posStore.currencySymbol }}{{ formatPrice(cartStore.subtotal) }}</span
-								>
+								<span>{{ money(cartStore.subtotal) }}</span>
 							</div>
 							<div
 								v-for="(tax, idx) in cartStore.calculatedTaxes"
@@ -103,7 +99,7 @@
 							>
 								<span class="flex items-center gap-1">
 									{{ tax.description }}
-									<span class="text-[10px]">({{ tax.rate }}%)</span>
+									<span class="text-[10px]">({{ percent(tax.rate) }})</span>
 									<span
 										v-if="tax.included_in_print_rate"
 										class="text-[9px] text-blue-500"
@@ -111,8 +107,7 @@
 									>
 								</span>
 								<span :class="tax.included_in_print_rate ? 'text-blue-500' : ''">
-									{{ tax.included_in_print_rate ? "" : "+" }}{{ posStore.currencySymbol
-									}}{{ formatPrice(tax.amount) }}
+									{{ formatTaxAmount(tax.amount, tax.included_in_print_rate, money) }}
 								</span>
 							</div>
 							<div
@@ -120,20 +115,18 @@
 								class="flex items-center justify-between text-xs text-emerald-600 dark:text-emerald-400"
 							>
 								<span>{{ __("Offer Discount") }}</span>
-								<span
-									>-{{ posStore.currencySymbol
-									}}{{ formatPrice(cartStore.offerItemDiscountTotal) }}</span
-								>
+								<span>-{{ money(cartStore.offerItemDiscountTotal) }}</span>
 							</div>
 							<div
 								v-if="cartStore.offerGrandTotalDiscountPct > 0"
 								class="flex items-center justify-between text-xs text-emerald-600 dark:text-emerald-400"
 							>
-								<span>{{ __("Offer") }} ({{ cartStore.offerGrandTotalDiscountPct }}%)</span>
 								<span
-									>-{{ posStore.currencySymbol
-									}}{{ formatPrice(paymentOfferGrandDiscount) }}</span
+									>{{ __("Offer") }} ({{
+										percent(cartStore.offerGrandTotalDiscountPct)
+									}})</span
 								>
+								<span>-{{ money(paymentOfferGrandDiscount) }}</span>
 							</div>
 							<div
 								v-if="cartStore.appliedCoupon"
@@ -175,11 +168,13 @@
 										if (el) methodRefs[idx] = el as HTMLButtonElement;
 									}
 								"
+								data-testid="payment-method"
+								:data-mode="method.mode_of_payment"
 								@click="selectMethod(method.mode_of_payment)"
 								@keydown.left.prevent="focusMethod(idx - 1)"
 								@keydown.right.prevent="focusMethod(idx + 1)"
 								@keydown.down.prevent="focusAmountInput"
-								class="flex-1 min-w-[80px] p-2.5 rounded-xl border-2 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-ring"
+								class="flex-1 min-w-20 p-2.5 rounded-xl border-2 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-ring"
 								:class="
 									selectedMethod === method.mode_of_payment
 										? 'border-primary bg-primary/5 text-primary shadow-sm'
@@ -196,6 +191,66 @@
 									{{ method.mode_of_payment }}
 								</p>
 							</button>
+						</div>
+
+						<div v-if="canRedeemGiftCards" class="mt-2" data-testid="gift-card-tender">
+							<p v-if="!offlineStore.isOnline" class="text-xs text-muted-foreground">
+								{{ __("Gift cards need a live connection.") }}
+							</p>
+							<div v-else-if="showGiftInput" class="flex gap-2">
+								<input
+									ref="giftCodeRef"
+									v-model="giftCodeInput"
+									data-testid="gift-card-code"
+									autocomplete="off"
+									class="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm font-mono uppercase"
+									:placeholder="__('Gift card code')"
+									@keydown.enter.stop.prevent="applyGiftCard"
+									@keydown.esc.stop.prevent="showGiftInput = false"
+								/>
+								<Button
+									size="sm"
+									:disabled="checkingGift || !giftCodeInput.trim()"
+									@click="applyGiftCard"
+								>
+									<Loader2 v-if="checkingGift" class="w-4 h-4 animate-spin" />
+									{{ __("Apply") }}
+								</Button>
+							</div>
+							<Button v-else variant="outline" size="sm" class="w-full" @click="openGiftInput">
+								<Gift class="w-4 h-4" />
+								{{ __("Pay with Gift Card") }}
+							</Button>
+						</div>
+
+						<div
+							v-if="
+								cartStore.isReturnMode &&
+								posStore.giftCardMode &&
+								cartStore.returnGiftCards.length
+							"
+							class="mt-2 space-y-1"
+						>
+							<Button
+								v-for="card in cartStore.returnGiftCards"
+								:key="card.gift_card"
+								variant="outline"
+								size="sm"
+								class="w-full"
+								:disabled="
+									!offlineStore.isOnline ||
+									splitPayments.some((leg) => leg.gift_card === card.gift_card)
+								"
+								@click="refundToGiftCard(card)"
+							>
+								<Gift class="w-4 h-4" />
+								{{
+									__("Refund to gift card {0} (up to {1})", [
+										card.masked_code,
+										money(card.amount),
+									])
+								}}
+							</Button>
 						</div>
 					</div>
 
@@ -220,13 +275,73 @@
 							ref="amountInput"
 							v-model="tenderedAmount"
 							:min="0"
-							:precision="2"
+							:precision="selectedPrecision"
 							class="text-center text-xl font-bold tracking-wider py-3"
 							:select-on-focus="true"
 							@keydown.enter.stop.prevent="handleAmountInputSubmit"
 							@keydown.up.prevent="focusMethodByIndex"
 							@keydown.down.prevent="focusFirstQuickAmount"
 						/>
+
+						<div v-if="selectedTakesReference" class="mt-2" data-testid="payment-reference">
+							<input
+								ref="referenceRef"
+								v-model="referenceNo"
+								autocomplete="off"
+								maxlength="140"
+								class="w-full h-9 rounded-md border border-input bg-background px-3 text-sm font-mono"
+								:placeholder="
+									selectedNeedsReference
+										? __('Transfer / reference number (required)')
+										: __('Transfer / reference number')
+								"
+								@keydown.enter.stop.prevent="handleAmountInputSubmit"
+							/>
+						</div>
+
+						<div v-if="selectedIsForeign" class="mt-1.5 space-y-1">
+							<p v-if="selectedRateMissing" class="text-xs font-medium text-destructive">
+								{{
+									__("No exchange rate for {0}. Set today's rate before accepting it.", [
+										selectedCurrency,
+									])
+								}}
+							</p>
+							<template v-else>
+								<p class="text-xs text-muted-foreground">
+									{{ formatWithSymbol(selectedCurrency, tenderedAmount) }}
+									{{ __("at") }} {{ formatFor(invoiceCurrency, selectedRate) }} =
+									<span class="font-semibold text-foreground">
+										{{
+											formatWithSymbol(
+												invoiceCurrency,
+												convertToBase(
+													selectedCurrency,
+													invoiceCurrency,
+													tenderedAmount,
+													selectedRate,
+												),
+											)
+										}}
+									</span>
+								</p>
+								<p
+									:class="
+										selectedRateIsStale
+											? 'text-xs font-medium text-amber-600 dark:text-amber-500'
+											: 'text-xs text-muted-foreground'
+									"
+								>
+									{{
+										selectedRateIsStale
+											? __("Rate is from {0} and has not been updated today.", [
+													selectedRateDate,
+												])
+											: __("Rate as of {0}", [selectedRateDate])
+									}}
+								</p>
+							</template>
+						</div>
 					</div>
 
 					<div v-if="isSplitPayment" class="space-y-2">
@@ -235,27 +350,46 @@
 							size="sm"
 							class="w-full"
 							@click="addSplitPayment"
-							:disabled="!selectedMethod || tenderedAmount <= 0"
+							:disabled="!selectedMethod || tenderedAmount <= 0 || referenceMissing"
 						>
 							<Plus class="w-4 h-4" />
-							Add {{ selectedMethod }} &mdash; {{ posStore.currencySymbol
-							}}{{ formatPrice(tenderedAmount) }}
+							Add {{ selectedMethod }} &mdash;
+							{{ formatWithSymbol(selectedCurrency, tenderedAmount) }}
 						</Button>
 
 						<div v-if="splitPayments.length > 0" class="space-y-1">
 							<div
 								v-for="(sp, idx) in splitPayments"
-								:key="idx"
+								:key="sp.id"
 								class="flex items-center justify-between bg-muted rounded-lg px-3 py-2 text-sm"
 							>
 								<div class="flex items-center gap-2">
 									<component :is="getMethodIcon(sp.mode_of_payment)" class="w-5 h-5" />
 									<span class="font-medium text-foreground">{{ sp.mode_of_payment }}</span>
+									<span
+										v-if="sp.masked_code"
+										class="font-mono text-xs text-muted-foreground"
+										>{{ sp.masked_code }}</span
+									>
+									<span
+										v-if="sp.reference_no"
+										class="font-mono text-xs text-muted-foreground"
+										>{{ sp.reference_no }}</span
+									>
 								</div>
 								<div class="flex items-center gap-2">
-									<span class="font-bold text-foreground"
-										>{{ posStore.currencySymbol }}{{ formatPrice(sp.amount) }}</span
-									>
+									<div class="text-right">
+										<span class="font-bold text-foreground">
+											{{ formatWithSymbol(sp.currency, sp.native_amount) }}
+										</span>
+										<span
+											v-if="sp.currency !== invoiceCurrency"
+											class="block text-xs text-muted-foreground"
+										>
+											@ {{ formatFor(invoiceCurrency, sp.exchange_rate) }} =
+											{{ formatWithSymbol(invoiceCurrency, sp.base_amount) }}
+										</span>
+									</div>
 									<button
 										@click="removeSplitPayment(idx)"
 										class="text-muted-foreground hover:text-destructive"
@@ -264,11 +398,26 @@
 									</button>
 								</div>
 							</div>
+
+							<div
+								v-if="hasForeignTender"
+								class="border-t border-border mt-1 pt-1 space-y-0.5 px-3"
+							>
+								<div
+									v-for="group in tenderByCurrency"
+									:key="group.currency"
+									class="flex justify-between text-xs text-muted-foreground"
+								>
+									<span>{{ formatWithSymbol(group.currency, group.native) }}</span>
+									<span>{{ formatWithSymbol(invoiceCurrency, group.base) }}</span>
+								</div>
+							</div>
+
 							<div class="flex justify-between text-sm font-semibold px-3 pt-1">
 								<span class="text-muted-foreground">{{ __("Total Paid") }}</span>
-								<span class="text-primary"
-									>{{ posStore.currencySymbol }}{{ formatPrice(splitTotal) }}</span
-								>
+								<span class="text-primary">
+									{{ formatWithSymbol(invoiceCurrency, splitTotal) }}
+								</span>
 							</div>
 						</div>
 					</div>
@@ -292,8 +441,52 @@
 							@keydown.left.prevent="focusQuickAmount(idx - 1)"
 							@keydown.right.prevent="focusQuickAmount(idx + 1)"
 						>
-							{{ posStore.currencySymbol }}{{ amount }}
+							{{ money(amount) }}
 						</Button>
+					</div>
+
+					<div
+						v-if="showCustomerCredit"
+						class="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3 space-y-2"
+						data-testid="customer-credit"
+					>
+						<div class="flex items-center justify-between">
+							<span class="text-sm font-medium text-foreground">{{
+								__("Customer Credit")
+							}}</span>
+							<Badge variant="secondary" class="text-[10px]">
+								{{ __("Available") }}: {{ money(availableCreditTotal) }}
+							</Badge>
+						</div>
+						<div
+							v-for="source in creditSources"
+							:key="creditKey(source)"
+							class="flex items-center justify-between gap-2 text-xs"
+						>
+							<span class="min-w-0 truncate">
+								{{
+									source.source_type === "Payment Entry"
+										? __("Advance payment")
+										: __("Credit note")
+								}}
+								{{ source.source_name }}
+								<span class="text-muted-foreground">({{ money(source.available) }})</span>
+							</span>
+							<NumberInput
+								v-model="creditAllocations[creditKey(source)]"
+								:min="0"
+								:max="source.available"
+								:precision="precisionFor(invoiceCurrency)"
+								class="w-24 text-end text-sm"
+								:aria-label="__('Credit to use from {0}', [source.source_name])"
+							/>
+						</div>
+						<p
+							v-if="creditApplied > 0"
+							class="text-xs font-medium text-emerald-700 dark:text-emerald-300"
+						>
+							{{ __("Using {0} of customer credit", [money(creditApplied)]) }}
+						</p>
 					</div>
 
 					<div
@@ -308,8 +501,9 @@
 								}}</span>
 							</div>
 							<Badge variant="secondary" class="text-[10px]">
-								{{ customerLoyaltyPoints }} {{ __("pts") }} ({{ posStore.currencySymbol
-								}}{{ formatPrice(customerLoyaltyAmount) }})
+								{{ customerLoyaltyPoints }} {{ __("pts") }} ({{
+									money(customerLoyaltyAmount)
+								}})
 							</Badge>
 						</div>
 
@@ -317,7 +511,7 @@
 							<div class="flex items-center justify-between text-xs">
 								<span class="text-violet-700 dark:text-violet-300 font-medium">
 									{{ __("Redeeming") }}: {{ cartStore.loyaltyPoints }} {{ __("pts") }} =
-									{{ posStore.currencySymbol }}{{ formatPrice(cartStore.loyaltyAmount) }}
+									{{ money(cartStore.loyaltyAmount) }}
 								</span>
 								<Button
 									variant="ghost"
@@ -348,8 +542,7 @@
 									>
 								</div>
 								<p class="text-[11px] text-violet-600 dark:text-violet-400">
-									{{ __("Discount") }}: {{ posStore.currencySymbol
-									}}{{ formatPrice(redeemInputAmount) }}
+									{{ __("Discount") }}: {{ money(redeemInputAmount) }}
 								</p>
 								<div class="flex gap-1.5">
 									<Button
@@ -400,16 +593,108 @@
 						<NumberInput
 							v-model="writeOffInput"
 							:min="0"
-							:precision="2"
+							:precision="moneyPrecision"
 							placeholder="0.00"
 							class="text-sm"
 							@change="cartStore.writeOffAmount = writeOffInput || 0"
 						/>
 					</div>
 
-					<div class="flex gap-2 mt-auto">
+					<div
+						v-if="showChangeAllocator"
+						class="mt-auto rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-2"
+					>
+						<div class="flex items-center justify-between">
+							<p class="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+								{{ __("Change") }}
+							</p>
+							<p
+								class="text-lg font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums"
+							>
+								{{ formatWithSymbol(invoiceCurrency, changeAmount) }}
+							</p>
+						</div>
+
 						<div
-							v-if="changeAmount > 0"
+							v-for="(leg, idx) in changeLegs"
+							:key="`${leg.mode_of_payment}-${idx}`"
+							data-testid="change-leg"
+							:data-mode="leg.mode_of_payment"
+							:data-currency="leg.currency"
+						>
+							<div class="flex items-center gap-2">
+								<component
+									:is="getMethodIcon(leg.mode_of_payment)"
+									class="w-4 h-4 shrink-0"
+								/>
+								<span class="text-xs font-medium text-foreground truncate flex-1">
+									{{ leg.mode_of_payment }}
+								</span>
+								<NumberInput
+									:model-value="leg.amount"
+									:min="0"
+									:precision="precisionFor(leg.currency)"
+									class="w-28 text-right text-sm py-1"
+									data-testid="change-leg-input"
+									@update:model-value="updateChangeLeg(idx, Number($event) || 0)"
+								/>
+								<button
+									v-if="changeLegs.length > 1"
+									@click="removeChangeLeg(idx)"
+									class="text-muted-foreground hover:text-destructive"
+								>
+									<X class="w-3.5 h-3.5" />
+								</button>
+							</div>
+							<p
+								v-if="leg.currency !== invoiceCurrency"
+								class="pl-6 text-[10px] text-muted-foreground"
+							>
+								@ {{ formatFor(invoiceCurrency, leg.exchange_rate) }} =
+								{{ formatWithSymbol(invoiceCurrency, leg.base_amount) }}
+							</p>
+						</div>
+
+						<div class="flex flex-wrap gap-1">
+							<Button
+								v-for="mode in posStore.cashTenderModes"
+								:key="mode.mode_of_payment"
+								variant="outline"
+								size="sm"
+								class="text-xs h-7"
+								data-testid="add-change-leg"
+								:data-mode="mode.mode_of_payment"
+								:disabled="changeRemaining <= 0"
+								@click="addChangeLeg(mode.mode_of_payment)"
+							>
+								<Plus class="w-3 h-3" />
+								{{ mode.mode_of_payment }}
+								<span v-if="changeRemaining > 0" class="text-muted-foreground">
+									{{
+										formatWithSymbol(
+											mode.pos_tender_currency,
+											changeRemainingIn(mode.pos_tender_currency),
+										)
+									}}
+								</span>
+							</Button>
+						</div>
+
+						<p
+							v-if="!changeAllocationValid"
+							class="text-xs font-medium text-destructive tabular-nums"
+						>
+							{{
+								__("{0} of change is still unallocated", [
+									formatWithSymbol(invoiceCurrency, changeRemaining),
+								])
+							}}
+						</p>
+					</div>
+
+					<div class="flex gap-2" :class="showChangeAllocator ? 'mt-2' : 'mt-auto'">
+						<div
+							v-if="changeAmount > 0 && !showChangeAllocator"
 							class="flex-1 bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3 text-center"
 						>
 							<p class="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 mb-0.5">
@@ -418,7 +703,7 @@
 							<p
 								class="text-lg font-extrabold text-emerald-700 dark:text-emerald-300 tabular-nums"
 							>
-								{{ posStore.currencySymbol }}{{ formatPrice(changeAmount) }}
+								{{ formatWithSymbol(invoiceCurrency, changeAmount) }}
 							</p>
 						</div>
 						<div
@@ -429,7 +714,7 @@
 								{{ remainingLabel }}
 							</p>
 							<p class="text-lg font-extrabold text-amber-700 dark:text-amber-300 tabular-nums">
-								{{ posStore.currencySymbol }}{{ formatPrice(remainingAmount) }}
+								{{ money(remainingAmount) }}
 							</p>
 							<p
 								v-if="outstandingSubmissionHint"
@@ -520,6 +805,7 @@
 							<Button
 								variant="ghost"
 								class="w-full justify-start gap-3 h-12 text-base font-medium"
+								data-testid="save-payment"
 								:disabled="isSubmitting || !canSubmit"
 								@click="submitPayment(false, false)"
 							>
@@ -532,7 +818,6 @@
 								{{ __("Save Only") }}
 							</Button>
 							<Button
-								ref="submitBtn"
 								variant="ghost"
 								:class="
 									cartStore.isReturnMode
@@ -584,17 +869,28 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { usePosStore } from "@/stores/posStore";
+import { useMoney } from "@/composables/useMoney";
 import { useCartStore } from "@/stores/cartStore";
+import { useCustomerStore } from "@/stores/customerStore";
 import { useAuthStore } from "@/stores/authStore";
 import { usePaymentStore } from "@/stores/paymentStore";
 import { call, showSuccess, showError, showInfo, isNetworkError } from "@/services/api";
 import { Popover, PopoverContentStyled, PopoverTrigger } from "@/components/ui/popover";
-import { useOfflineStore } from "@/stores/offlineStore";
 import { __ } from "@/lib/translate";
 import { usePrintInvoice } from "@/composables/usePrintInvoice";
 import { useEmailStore } from "@/stores/useEmailStore";
+import { submitDurableInvoice } from "@/services/invoiceSubmission";
+import { useOfflineSale } from "@/composables/useOfflineSale";
 import { isElectron } from "@/services/electronBridge";
-import { fiscalizeViaLocalService } from "@/services/fbrLocalService";
+import {
+	completeLocalFiscalization,
+	FiscalUncertainError,
+	LocalFiscalRejected,
+} from "@/services/fbrLocalService";
+import { addPendingInvoice } from "@/services/dbBridge";
+import { checkGiftCard, hasGiftCardActivity } from "@/services/giftCards";
+import { hasPermission } from "@/services/userRights";
+import { useOfflineStore } from "@/stores/offlineStore";
 import {
 	Dialog,
 	DialogContent,
@@ -627,9 +923,40 @@ import {
 	Mail,
 } from "lucide-vue-next";
 
-import type { InvoiceData, InvoicePayment } from "@/types/pos.types";
+import {
+	convertToBase,
+	formatFor,
+	formatWithSymbol,
+	precisionFor,
+	roundFor,
+} from "@/composables/useCurrency";
+import {
+	buildChangeLeg,
+	buildTenderLeg,
+	changeBaseTotal,
+	changeRemaining as remainingChange,
+	groupTenderByCurrency,
+	isChangeAllocationValid,
+	mergeTenderLeg,
+	negateForReturn,
+	remainingIn,
+	tenderBaseTotal,
+	toInvoicePayments,
+	type TenderContext,
+} from "@/services/tenderLegs";
+import type {
+	CustomerCreditSource,
+	GiftCardRefund,
+	InvoiceChangeLeg,
+	InvoiceData,
+	InvoicePayment,
+	IssuedGiftCard,
+	RepriceResponse,
+	TenderLeg,
+} from "@/types/pos.types";
 import { isOnline, extractErrorMessage, isTabConflictError } from "@/utils";
 import { nowDate } from "@/utils/datetime";
+import { formatTaxAmount } from "@/utils/numberFormat";
 import {
 	isPaymentDialogSaveAndPrintShortcut,
 	isPaymentDialogSaveOnlyShortcut,
@@ -637,9 +964,12 @@ import {
 } from "@/components/dialogs/paymentDialogShortcuts";
 
 const posStore = usePosStore();
+const { moneyPrecision, percent } = useMoney();
 const { printInvoice, printInvoiceLocal } = usePrintInvoice();
 const emailStore = useEmailStore();
+const { completeOfflineSale } = useOfflineSale();
 const cartStore = useCartStore();
+const customerStore = useCustomerStore();
 const authStore = useAuthStore();
 const paymentStore = usePaymentStore();
 const offlineStore = useOfflineStore();
@@ -652,13 +982,54 @@ const numpadRefs: Record<number, HTMLElement> = {};
 
 const selectedMethod = ref("");
 const tenderedAmount = ref(0);
+const creditSources = ref<CustomerCreditSource[]>([]);
+const creditAllocations = ref<Record<string, number>>({});
+
+function creditKey(source: CustomerCreditSource): string {
+	return `${source.source_type}:${source.source_name}`;
+}
+
+const showCustomerCredit = computed(
+	() =>
+		posStore.useCustomerCredit &&
+		!cartStore.isReturnMode &&
+		!!cartStore.customer &&
+		offlineStore.isOnline &&
+		!isElectron() &&
+		creditSources.value.length > 0,
+);
+
+const availableCreditTotal = computed(() => creditSources.value.reduce((sum, s) => sum + s.available, 0));
+
+const creditApplied = computed(() => {
+	if (!showCustomerCredit.value) return 0;
+	return roundCurrency(
+		creditSources.value.reduce(
+			(sum, s) => sum + Math.min(Math.max(creditAllocations.value[creditKey(s)] || 0, 0), s.available),
+			0,
+		),
+	);
+});
+
+watch(creditApplied, (credit) => {
+	if (isSplitPayment.value) return;
+	const due = roundCurrency(Math.max(Math.abs(cartStore.grandTotal) - credit, 0));
+	tenderedAmount.value = due;
+	nextTick(() => amountInput.value?.setValue(due));
+});
 const isSubmitting = ref(false);
 const writeOffInput = ref(0);
 const printAfterSave = ref(false);
 const emailAfterSave = ref(false);
 
 const isSplitPayment = ref(false);
-const splitPayments = ref<InvoicePayment[]>([]);
+const splitPayments = ref<TenderLeg[]>([]);
+
+const referenceRef = ref<HTMLInputElement | null>(null);
+const referenceNo = ref("");
+
+const changeLegs = ref<InvoiceChangeLeg[]>([]);
+const changeTouched = ref(false);
 
 const customerLoyaltyPoints = ref(0);
 const customerLoyaltyAmount = ref(0);
@@ -672,10 +1043,26 @@ const redeemPointsInput = ref(0);
 const numpadKeys = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "C", "0", "⌫"];
 
 const availableMethods = computed(() => {
-	const methods = posStore.paymentMethods;
+	// the gift card mode is tendered only through a scanned card, never as a plain amount
+	const methods = posStore.paymentMethods.filter((m) => m.mode_of_payment !== posStore.giftCardMode);
 	if (methods.length > 0) return methods;
 	return [{ mode_of_payment: "Cash" }, { mode_of_payment: "Card" }];
 });
+
+const giftCodeRef = ref<HTMLInputElement | null>(null);
+const giftCodeInput = ref("");
+const showGiftInput = ref(false);
+const checkingGift = ref(false);
+
+const canRedeemGiftCards = computed(
+	() =>
+		!!posStore.giftCardMode &&
+		!cartStore.isReturnMode &&
+		!cartStore.isGiftCardSale &&
+		hasPermission("redeem_gift_card"),
+);
+const hasGiftCardLegs = computed(() => splitPayments.value.some((leg) => leg.gift_card));
+const isGiftCardSale = computed(() => cartStore.isGiftCardSale || hasGiftCardLegs.value);
 
 const quickAmounts = computed(() => {
 	const total = Math.abs(cartStore.grandTotal);
@@ -688,7 +1075,63 @@ const quickAmounts = computed(() => {
 	return [...new Set(amounts)].sort((a, b) => a - b).slice(0, 4);
 });
 
-const splitTotal = computed(() => splitPayments.value.reduce((sum, p) => sum + (p.amount || 0), 0));
+const invoiceCurrency = computed(() => posStore.invoiceCurrency || posStore.currency || "");
+
+const selectedCurrency = computed(
+	() => posStore.tenderCurrencyFor(selectedMethod.value) || invoiceCurrency.value,
+);
+const selectedRate = computed(() => posStore.tenderRateFor(selectedMethod.value));
+const selectedPrecision = computed(() => precisionFor(selectedCurrency.value));
+const selectedIsForeign = computed(() => selectedCurrency.value !== invoiceCurrency.value);
+const selectedRateDate = computed(() => posStore.tenderModeFor(selectedMethod.value)?.rate_date || "");
+
+const selectedRateIsStale = computed(
+	() => selectedIsForeign.value && !!selectedRateDate.value && selectedRateDate.value < nowDate(),
+);
+const selectedRateMissing = computed(() => selectedIsForeign.value && !selectedRate.value);
+
+const tenderContext = computed<TenderContext>(() => ({
+	invoiceCurrency: invoiceCurrency.value,
+	modeInfo: (mode: string) => posStore.tenderModeFor(mode),
+}));
+
+function buildLeg(mode: string, nativeAmount: number, id?: string): TenderLeg {
+	return buildTenderLeg(mode, nativeAmount, tenderContext.value, id);
+}
+
+const selectedTakesReference = computed(() => {
+	const mode = posStore.tenderModeFor(selectedMethod.value);
+	return !!(mode?.takes_reference || mode?.requires_reference);
+});
+const selectedNeedsReference = computed(
+	() => !!posStore.tenderModeFor(selectedMethod.value)?.requires_reference && !cartStore.isReturnMode,
+);
+const referenceMissing = computed(() => selectedNeedsReference.value && !referenceNo.value.trim());
+
+watch(selectedMethod, () => {
+	referenceNo.value = "";
+});
+
+function withReference(leg: TenderLeg): TenderLeg {
+	const reference = referenceNo.value.trim();
+	if (selectedTakesReference.value && reference) leg.reference_no = reference;
+	return leg;
+}
+
+const activeLegs = computed<TenderLeg[]>(() => {
+	if (isSplitPayment.value) return splitPayments.value;
+	if (!selectedMethod.value || tenderedAmount.value <= 0) return [];
+	return [withReference(buildLeg(selectedMethod.value, tenderedAmount.value, "single"))];
+});
+
+const splitTotal = computed(() => tenderBaseTotal(splitPayments.value, invoiceCurrency.value));
+const legsBaseTotal = computed(() => tenderBaseTotal(activeLegs.value, invoiceCurrency.value));
+
+const tenderByCurrency = computed(() => groupTenderByCurrency(activeLegs.value, invoiceCurrency.value));
+
+const hasForeignTender = computed(() =>
+	activeLegs.value.some((leg) => leg.currency !== invoiceCurrency.value),
+);
 
 const maxRedeemablePoints = computed(() => {
 	const total = Math.abs(cartStore.grandTotal);
@@ -710,27 +1153,89 @@ const paymentOfferGrandDiscount = computed(() => {
 	return (base * cartStore.offerGrandTotalDiscountPct) / 100;
 });
 
-const effectiveTendered = computed(() => (isSplitPayment.value ? splitTotal.value : tenderedAmount.value));
+const effectiveTendered = computed(() => legsBaseTotal.value);
 
 const changeAmount = computed(() => {
-	const total = Math.abs(cartStore.grandTotal);
+	const total = Math.abs(cartStore.grandTotal) - creditApplied.value;
 	const diff = roundCurrency(effectiveTendered.value - total);
 	return diff > 0 ? diff : 0;
 });
 
 const remainingAmount = computed(() => {
 	const total = Math.abs(cartStore.grandTotal);
-	const diff = roundCurrency(total - effectiveTendered.value);
+	const diff = roundCurrency(total - creditApplied.value - effectiveTendered.value);
 	return diff > 0 ? diff : 0;
 });
 
-const hasRecordedPayment = computed(() => {
-	const amount = isSplitPayment.value ? splitTotal.value : tenderedAmount.value;
-	return roundCurrency(amount) > 0;
+const hasRecordedPayment = computed(() => roundCurrency(effectiveTendered.value) > 0);
+
+const defaultChangeMode = computed(() => {
+	const modes = posStore.cashTenderModes;
+	const configured = modes.find((mode) => mode.mode_of_payment === posStore.cashModeOfPayment);
+	if (configured) return configured.mode_of_payment;
+	const inInvoiceCurrency = modes.find((mode) => mode.pos_tender_currency === invoiceCurrency.value);
+	return (inInvoiceCurrency || modes[0])?.mode_of_payment || posStore.cashModeOfPayment;
 });
+
+function buildChangeLegFor(mode: string, nativeAmount: number): InvoiceChangeLeg {
+	return buildChangeLeg(mode, nativeAmount, tenderContext.value);
+}
+
+const changeAllocatedBase = computed(() => changeBaseTotal(changeLegs.value, invoiceCurrency.value));
+
+const changeRemaining = computed(() =>
+	remainingChange(changeAmount.value, changeLegs.value, invoiceCurrency.value),
+);
+
+const changeAllocationValid = computed(() =>
+	isChangeAllocationValid(changeAmount.value, changeLegs.value, invoiceCurrency.value),
+);
+
+const showChangeAllocator = computed(
+	() => changeAmount.value > 0 && posStore.allowMixedCurrencyTender && !cartStore.isReturnMode,
+);
+
+watch(
+	changeAmount,
+	(amount) => {
+		if (amount <= 0 || cartStore.isReturnMode) {
+			changeLegs.value = [];
+			changeTouched.value = false;
+			return;
+		}
+		if (!changeTouched.value) {
+			changeLegs.value = [buildChangeLegFor(defaultChangeMode.value, amount)];
+		}
+	},
+	{ immediate: true },
+);
+
+function addChangeLeg(mode: string) {
+	const native = changeRemainingIn(posStore.tenderCurrencyFor(mode));
+	changeTouched.value = true;
+	changeLegs.value.push(buildChangeLegFor(mode, native));
+}
+
+function updateChangeLeg(index: number, nativeAmount: number) {
+	const leg = changeLegs.value[index];
+	if (!leg) return;
+	changeTouched.value = true;
+	changeLegs.value[index] = buildChangeLegFor(leg.mode_of_payment, nativeAmount);
+}
+
+function removeChangeLeg(index: number) {
+	changeTouched.value = true;
+	changeLegs.value.splice(index, 1);
+}
+
+function changeRemainingIn(currency: string): number {
+	const mode = posStore.cashTenderModes.find((m) => m.pos_tender_currency === currency);
+	return remainingIn(changeRemaining.value, currency, invoiceCurrency.value, mode?.exchange_rate || 0);
+}
 
 const canSubmitOutstanding = computed(() => {
 	if (cartStore.isReturnMode || remainingAmount.value <= 0) return false;
+	if (cartStore.isGiftCardSale) return false;
 	if (posStore.allowCreditSale) return true;
 	return hasRecordedPayment.value && posStore.allowPartialPayment;
 });
@@ -749,15 +1254,17 @@ const outstandingSubmissionHint = computed(() => {
 
 const canSubmit = computed(() => {
 	if (cartStore.isEmpty) return false;
+	if (isGiftCardSale.value && !offlineStore.isOnline) return false;
+	if (selectedRateMissing.value) return false;
+	if (!isSplitPayment.value && referenceMissing.value) return false;
 	const total = roundCurrency(Math.abs(cartStore.grandTotal));
 	if (total <= 0) return true;
 	if (remainingAmount.value > 0) {
 		return canSubmitOutstanding.value;
 	}
-	if (isSplitPayment.value) {
-		return roundCurrency(splitTotal.value) >= total;
-	}
-	return selectedMethod.value !== "" && roundCurrency(tenderedAmount.value) >= total;
+	if (!changeAllocationValid.value) return false;
+	if (!isSplitPayment.value && !selectedMethod.value) return false;
+	return roundCurrency(effectiveTendered.value + creditApplied.value) >= total;
 });
 
 onMounted(async () => {
@@ -779,6 +1286,7 @@ onMounted(async () => {
 				cartStore.customer.name,
 				posStore.companyName,
 			);
+			creditSources.value = credit?.sources || [];
 			if (credit) {
 				customerLoyaltyPoints.value = credit.loyalty_points || 0;
 				customerLoyaltyAmount.value = credit.loyalty_amount || 0;
@@ -788,13 +1296,11 @@ onMounted(async () => {
 		}
 
 		try {
-			const info = await call<{
-				balance?: number;
-				credit_limit?: number;
-				loyalty_points?: number;
-				loyalty_program?: { conversion_factor?: number };
-			}>("xpos.api.customers.get_customer_info", { customer: cartStore.customer.name });
-			if (info) {
+			if (customerStore.selectedCustomerInfo?.name !== cartStore.customer.name) {
+				await customerStore.getCustomerInfo(cartStore.customer.name);
+			}
+			const info = customerStore.selectedCustomerInfo;
+			if (info && info.name === cartStore.customer.name) {
 				customerBalance.value = info.balance ?? null;
 				customerCreditLimit.value = info.credit_limit ?? 0;
 				if ((info.loyalty_points ?? 0) > 0) {
@@ -831,6 +1337,11 @@ onUnmounted(() => {
 
 function handleAmountInputSubmit(event: KeyboardEvent) {
 	if (isSubmitting.value) return;
+
+	if (referenceMissing.value && tenderedAmount.value > 0) {
+		referenceRef.value?.focus();
+		return;
+	}
 
 	if (isPaymentDialogSaveOnlyShortcut(event)) {
 		if (canSubmit.value) {
@@ -928,24 +1439,106 @@ function enableSplitPayment() {
 	tenderedAmount.value = 0;
 }
 
+function refillTenderRemainder() {
+	const owed = Math.max(0, roundCurrency(Math.abs(cartStore.grandTotal) - splitTotal.value));
+	const rate = posStore.tenderRateFor(selectedMethod.value) || 1;
+	tenderedAmount.value = roundFor(selectedCurrency.value, owed / rate);
+}
+
 function addSplitPayment() {
 	if (!selectedMethod.value || tenderedAmount.value <= 0) return;
-	const existing = splitPayments.value.find((p) => p.mode_of_payment === selectedMethod.value);
-	if (existing) {
-		existing.amount = roundCurrency(existing.amount + tenderedAmount.value);
-	} else {
-		splitPayments.value.push({
-			mode_of_payment: selectedMethod.value,
-			amount: roundCurrency(tenderedAmount.value),
-		});
+	if (referenceMissing.value) {
+		referenceRef.value?.focus();
+		return;
 	}
-	tenderedAmount.value = roundCurrency(Math.max(0, Math.abs(cartStore.grandTotal) - splitTotal.value));
+	const leg = withReference(buildLeg(selectedMethod.value, tenderedAmount.value));
+	mergeTenderLeg(splitPayments.value, leg, tenderContext.value);
+	referenceNo.value = "";
+	refillTenderRemainder();
 }
 
 function removeSplitPayment(idx: number) {
 	splitPayments.value.splice(idx, 1);
-	tenderedAmount.value = roundCurrency(Math.max(0, Math.abs(cartStore.grandTotal) - splitTotal.value));
+	cartStore.setGiftCardTender(hasGiftCardLegs.value || cartStore.returnGiftCards.length > 0);
+	refillTenderRemainder();
 }
+
+function openGiftInput() {
+	showGiftInput.value = true;
+	nextTick(() => giftCodeRef.value?.focus());
+}
+
+function addGiftCardLeg(mode: string, amount: number, card: Partial<TenderLeg>) {
+	if (!isSplitPayment.value) {
+		isSplitPayment.value = true;
+		splitPayments.value = [];
+	}
+	splitPayments.value.push({ ...buildLeg(mode, amount), ...card });
+	const other = availableMethods.value[0]?.mode_of_payment;
+	if (other) selectedMethod.value = other;
+	refillTenderRemainder();
+}
+
+async function applyGiftCard() {
+	const code = giftCodeInput.value.trim();
+	if (!code || checkingGift.value) return;
+	if (!isOnline()) {
+		showError(__("Gift cards need a live connection."));
+		return;
+	}
+	checkingGift.value = true;
+	try {
+		const card = await checkGiftCard(code, posStore.profileName);
+		if (splitPayments.value.some((leg) => leg.gift_card === card.gift_card)) {
+			showInfo(__("This gift card is already applied."));
+			return;
+		}
+		// a sale paid by card is charged to the cent, so drop rounding before working out what is due
+		cartStore.setGiftCardTender(true);
+		const paidSoFar = isSplitPayment.value ? splitTotal.value : 0;
+		const due = roundCurrency(Math.abs(cartStore.grandTotal) - paidSoFar);
+		const amount = roundCurrency(Math.min(card.balance, due));
+		if (amount <= 0) {
+			cartStore.setGiftCardTender(hasGiftCardLegs.value);
+			showInfo(__("Nothing is left to pay."));
+			return;
+		}
+		addGiftCardLeg(card.mode_of_payment, amount, {
+			gift_card: card.gift_card,
+			gift_card_auth: card.auth,
+			masked_code: card.masked_code,
+		});
+		giftCodeInput.value = "";
+		showGiftInput.value = false;
+		showInfo(
+			__("Gift card {0}: {1} applied, {2} left on the card.", [
+				card.masked_code,
+				money(amount),
+				money(card.balance - amount),
+			]),
+		);
+	} catch (error) {
+		showError(extractErrorMessage(error));
+	} finally {
+		checkingGift.value = false;
+	}
+}
+
+function refundToGiftCard(card: GiftCardRefund) {
+	const paidSoFar = isSplitPayment.value ? splitTotal.value : 0;
+	const due = roundCurrency(Math.abs(cartStore.grandTotal) - paidSoFar);
+	const amount = roundCurrency(Math.min(card.amount, due));
+	if (amount <= 0) return;
+	addGiftCardLeg(posStore.giftCardMode, amount, {
+		gift_card: card.gift_card,
+		masked_code: card.masked_code,
+	});
+}
+
+watch(selectedCurrency, (next, prev) => {
+	if (!prev || next === prev) return;
+	refillTenderRemainder();
+});
 
 function openLoyaltyInput() {
 	if (maxRedeemablePoints.value <= 0) {
@@ -993,11 +1586,10 @@ function handleNumpad(key: string) {
 	const current = String(tenderedAmount.value || "");
 	if (key === "C") {
 		tenderedAmount.value = 0;
-	} else if (key === "⌫") {
-		tenderedAmount.value = parseFloat(current.slice(0, -1)) || 0;
-	} else {
-		tenderedAmount.value = parseFloat(current + key) || 0;
+		return;
 	}
+	const next = key === "⌫" ? parseFloat(current.slice(0, -1)) : parseFloat(current + key);
+	tenderedAmount.value = roundFor(selectedCurrency.value, next || 0);
 }
 
 function validateForSubmission(): { valid: boolean; message?: string } {
@@ -1029,51 +1621,86 @@ function validateForSubmission(): { valid: boolean; message?: string } {
 		}
 	}
 
+	if (isGiftCardSale.value && (!isOnline() || isElectron())) {
+		return {
+			valid: false,
+			message: __("Gift cards need a live connection. This sale cannot be saved offline."),
+		};
+	}
+
+	if (selectedRateMissing.value) {
+		return {
+			valid: false,
+			message: __("No exchange rate is available for {0}. Set today's rate before accepting it.", [
+				selectedCurrency.value,
+			]),
+		};
+	}
+
+	if (creditApplied.value > roundCurrency(Math.abs(cartStore.grandTotal))) {
+		return { valid: false, message: __("Customer credit is more than the amount due.") };
+	}
+
+	if (!cartStore.isReturnMode && remainingAmount.value > 0 && !canSubmitOutstanding.value) {
+		return {
+			valid: false,
+			message: __("Tendered {0} covers {1}. {2} is still due.", [
+				formatWithSymbol(invoiceCurrency.value, effectiveTendered.value),
+				formatWithSymbol(invoiceCurrency.value, Math.abs(cartStore.grandTotal)),
+				formatWithSymbol(invoiceCurrency.value, remainingAmount.value),
+			]),
+		};
+	}
+
+	if (!changeAllocationValid.value) {
+		return {
+			valid: false,
+			message: __("Change of {0} is not fully allocated. {1} is unaccounted for.", [
+				formatWithSymbol(invoiceCurrency.value, changeAmount.value),
+				formatWithSymbol(invoiceCurrency.value, changeRemaining.value),
+			]),
+		};
+	}
+
 	return { valid: true };
 }
 
 function buildSubmissionPayments(): InvoicePayment[] {
-	if (isSplitPayment.value) {
-		return splitPayments.value
-			.filter((payment) => roundCurrency(payment.amount || 0) > 0)
-			.map((payment) => ({
-				...payment,
-				amount: roundCurrency(payment.amount || 0),
-			}));
-	}
-
-	if (!selectedMethod.value || roundCurrency(tenderedAmount.value) <= 0) {
-		return [];
-	}
-
-	return [
-		{
-			mode_of_payment: selectedMethod.value,
-			amount: roundCurrency(tenderedAmount.value),
-		},
-	];
+	return toInvoicePayments(activeLegs.value, invoiceCurrency.value);
 }
 
-function applySubmissionPayments(invoiceData: InvoiceData): void {
-	let payments = buildSubmissionPayments();
+function buildInvoicePayload(): InvoiceData {
+	const shiftName = posStore.posOpeningShift?.name || "";
+	const payments = cartStore.isReturnMode
+		? negateForReturn(buildSubmissionPayments())
+		: buildSubmissionPayments();
 
-	if (cartStore.isReturnMode) {
-		payments = payments.map((payment) => ({
-			...payment,
-			amount: -Math.abs(payment.amount),
-		}));
-	}
+	cartStore.setPayments(payments);
+	cartStore.setChangeAmount(cartStore.isReturnMode ? 0 : changeAmount.value);
+	cartStore.setChangeLegs(cartStore.isReturnMode ? [] : changeLegs.value.filter((leg) => leg.amount > 0));
 
-	if (payments.length > 0) {
-		invoiceData.payments = payments;
-	}
+	const invoiceData = cartStore.getInvoiceData(posStore.profileName, shiftName);
 
 	if (!cartStore.isReturnMode && remainingAmount.value > 0 && posStore.allowCreditSale) {
 		invoiceData.is_credit_sale = true;
 	}
+
+	if (creditApplied.value > 0) {
+		invoiceData.customer_credit = creditSources.value
+			.map((source) => ({
+				source_type: source.source_type,
+				source_name: source.source_name,
+				amount: roundCurrency(
+					Math.min(creditAllocations.value[creditKey(source)] || 0, source.available),
+				),
+			}))
+			.filter((row) => row.amount > 0);
+	}
+
+	return invoiceData;
 }
 
-async function submitPayment(withPrint: boolean = true, withEmail: boolean = true) {
+async function submitPayment(withPrint: boolean = true, withEmail: boolean = false) {
 	if (isSubmitting.value) return;
 
 	if (showLoyaltyInput.value && !cartStore.redeemLoyaltyPoints && (redeemPointsInput.value || 0) > 0) {
@@ -1088,6 +1715,11 @@ async function submitPayment(withPrint: boolean = true, withEmail: boolean = tru
 		return;
 	}
 
+	if (cartStore.pricingIssues.length) {
+		showError(cartStore.pricingIssues.join("\n"));
+		return;
+	}
+
 	const stockCheck = await cartStore.revalidateStock();
 	if (!stockCheck.valid) {
 		showError(stockCheck.messages.join("\n"));
@@ -1098,14 +1730,14 @@ async function submitPayment(withPrint: boolean = true, withEmail: boolean = tru
 	printAfterSave.value = withPrint;
 	emailAfterSave.value = withEmail;
 
+	const invoiceData = buildInvoicePayload();
+	const giftCardSale = hasGiftCardActivity(invoiceData);
 	try {
 		const shiftName = posStore.posOpeningShift?.name || "";
-		const invoiceData = cartStore.getInvoiceData(posStore.profileName, shiftName);
 
-		applySubmissionPayments(invoiceData);
-
-		if (changeAmount.value > 0) {
-			invoiceData.change_amount = changeAmount.value;
+		if (giftCardSale || invoiceData.customer_credit?.length) {
+			await submitGiftCardSale(invoiceData, withPrint, withEmail);
+			return;
 		}
 
 		if (isElectron() && window.electronAPI?.db) {
@@ -1143,28 +1775,24 @@ async function submitPayment(withPrint: boolean = true, withEmail: boolean = tru
 		}
 
 		if (!isOnline()) {
-			const result = await offlineStore.saveOffline(
-				invoiceData,
-				cartStore.customerName,
-				cartStore.grandTotal,
-				cartStore.getStockReservations(),
-			);
-			if (result.success) {
-				showInfo(
-					__(`Invoice saved offline (#${result.localId}). It will sync when you're back online.`),
-				);
-				cartStore.clearAll();
-			} else {
-				showError(__("Failed to save invoice offline"));
-			}
+			const saved = await completeOfflineSale(invoiceData, {
+				withPrint,
+				cashier: authStore.userFullName,
+			});
+			if (!saved) showError(__("Failed to save invoice offline"));
 			return;
 		}
-		let result = await call<CreateInvoiceResult>("xpos.api.invoices.create_invoice", {
-			data: JSON.stringify(invoiceData),
-		});
-		if (result.status === "fbr_local_required") {
-			result = await finalizeWithLocalFbr(result);
-		}
+		const result = await submitDurableInvoice(
+			invoiceData,
+			cartStore.getReceiptSnapshot("", authStore.userFullName),
+			async () => {
+				let response = await call<CreateInvoiceResult>("xpos.api.invoices.create_invoice", {
+					data: JSON.stringify(invoiceData),
+				});
+				return await finalizeWithLocalFbr(response);
+			},
+		);
+		if (handleRepricing(result)) return;
 
 		posStore.lastInvoiceName = result.name;
 
@@ -1174,42 +1802,30 @@ async function submitPayment(withPrint: boolean = true, withEmail: boolean = tru
 			showSuccess(__("Invoice {0} saved successfully!", [result.name]));
 		}
 
+		cartStore.clearAll();
 		if (withPrint && result.name) {
-			await printInvoice(result.name);
+			try {
+				await printInvoice(result.name);
+			} catch {
+				showError(__("Sale saved. Receipt printing failed; use Reprint."));
+			}
 		}
-
 		if (withEmail && result.name) {
 			emailStore.openEmailComposer(result.name);
 		}
-
-		cartStore.clearAll();
 	} catch (error: unknown) {
-		if (isTabConflictError(error)) {
+		if (error instanceof FiscalUncertainError) {
+			await holdForFiscalCheck(error, invoiceData, true);
+		} else if (isTabConflictError(error)) {
 			showError(__("This tab was changed on another terminal. Reload it and try again."));
 			close();
 			cartStore.openDraftDialog();
 		} else if (isNetworkError(error)) {
-			const invoiceData = cartStore.getInvoiceData(
-				posStore.profileName,
-				posStore.posOpeningShift?.name || "",
-			);
-			applySubmissionPayments(invoiceData);
-			if (changeAmount.value > 0) {
-				invoiceData.change_amount = changeAmount.value;
-			}
-			const result = await offlineStore.saveOffline(
-				invoiceData,
-				cartStore.customerName,
-				cartStore.grandTotal,
-				cartStore.getStockReservations(),
-			);
-			if (result.success) {
-				showInfo(
-					__(`Invoice saved offline (#${result.localId}). It will sync when you're back online.`),
-				);
-				cartStore.clearAll();
-				return;
-			}
+			const saved = await completeOfflineSale(invoiceData, {
+				withPrint,
+				cashier: authStore.userFullName,
+			});
+			if (saved) return;
 			showError(__("You are offline. Invoice could not be saved locally."));
 		} else {
 			showError(__("Payment failed: {0}", [extractErrorMessage(error)]));
@@ -1218,29 +1834,90 @@ async function submitPayment(withPrint: boolean = true, withEmail: boolean = tru
 	} finally {
 		isSubmitting.value = false;
 		printAfterSave.value = false;
+		emailAfterSave.value = false;
 	}
+}
+
+/**
+ * Gift card value moves only on a live server, so these sales skip the offline queue. If the
+ * response is lost the cart stays put: paying again resends the same sale, which the server
+ * recognises and never charges twice.
+ */
+async function submitGiftCardSale(invoiceData: InvoiceData, withPrint: boolean, withEmail: boolean) {
+	if (isElectron() || !isOnline()) {
+		showError(
+			invoiceData.customer_credit?.length
+				? __("Customer credit needs a live connection. This sale cannot be saved offline.")
+				: __("Gift cards need a live connection. This sale cannot be saved offline."),
+		);
+		return;
+	}
+	let result: CreateInvoiceResult;
+	try {
+		result = await call<CreateInvoiceResult>("xpos.api.invoices.create_invoice", {
+			data: JSON.stringify(invoiceData),
+		});
+		result = await finalizeWithLocalFbr(result);
+	} catch (error) {
+		if (error instanceof FiscalUncertainError) {
+			await holdForFiscalCheck(error, invoiceData, false);
+		} else if (isNetworkError(error)) {
+			showError(
+				__(
+					"The connection dropped before the server answered. Press Pay again to finish this sale; it will not be charged twice.",
+				),
+			);
+		} else {
+			showError(__("Payment failed: {0}", [extractErrorMessage(error)]));
+		}
+		return;
+	}
+
+	if (handleRepricing(result)) return;
+	posStore.lastInvoiceName = result.name;
+	showSuccess(__("Invoice {0} saved successfully!", [result.name]));
+	if (result.issued_gift_cards?.length) cartStore.showIssuedGiftCards(result.issued_gift_cards);
+	cartStore.clearAll();
+	if (withPrint && result.name) {
+		try {
+			await printInvoice(result.name);
+		} catch {
+			showError(__("Sale saved. Receipt printing failed; use Reprint."));
+		}
+	}
+	if (withEmail && result.name) {
+		emailStore.openEmailComposer(result.name);
+	}
+}
+
+function handleRepricing(result: CreateInvoiceResult): boolean {
+	if (result.status !== "reprice_required") return false;
+	cartStore.applyServerRepricing(result as unknown as RepriceResponse);
+	showError((result as unknown as RepriceResponse).message);
+	close();
+	return true;
 }
 
 interface CreateInvoiceResult {
 	name: string;
+	usin?: string;
+	issued_gift_cards?: IssuedGiftCard[];
 	status?: string;
 	doctype?: string;
 	fbr_payload?: Record<string, unknown>;
 	fbr_local_service_url?: string;
+	message?: string;
 }
 
+/** Finish a sale the server saved as a draft waiting for FBR; other answers pass through. */
 async function finalizeWithLocalFbr(pending: CreateInvoiceResult): Promise<CreateInvoiceResult> {
+	if (pending.status === "fbr_uncertain")
+		throw new FiscalUncertainError(pending.name || pending.usin || "", pending.message || "");
+	if (pending.status !== "fbr_local_required") return pending;
 	try {
-		const { invoiceNumber } = await fiscalizeViaLocalService(
-			pending.fbr_payload || {},
-			pending.fbr_local_service_url || "",
-		);
-		return await call<CreateInvoiceResult>("xpos.api.invoices.finalize_fiscal_invoice", {
-			name: pending.name,
-			fbr_invoice_number: invoiceNumber,
-			doctype: pending.doctype,
-		});
+		return await completeLocalFiscalization<CreateInvoiceResult>(pending);
 	} catch (err) {
+		if (!(err instanceof LocalFiscalRejected)) throw err;
 		await call("xpos.api.invoices.discard_draft_invoice", {
 			name: pending.name,
 			doctype: pending.doctype,
@@ -1248,11 +1925,30 @@ async function finalizeWithLocalFbr(pending: CreateInvoiceResult): Promise<Creat
 			/* best-effort cleanup */
 		});
 		throw new Error(
-			__("FBR fiscalization failed — both the FBR cloud and the local service are unavailable.") +
+			__("FBR fiscalization failed - both the FBR cloud and the local service are unavailable.") +
 				" " +
 				extractErrorMessage(err),
 		);
 	}
+}
+
+async function holdForFiscalCheck(error: FiscalUncertainError, invoiceData: InvoiceData, queued: boolean) {
+	if (!queued) {
+		await addPendingInvoice({
+			data: invoiceData,
+			receipt: cartStore.getReceiptSnapshot("", authStore.userFullName),
+			customer_name: invoiceData.customer,
+			grand_total: cartStore.grandTotal,
+		});
+	}
+	cartStore.clearAll();
+	close();
+	showError(
+		__("FBR did not confirm invoice {0}. Check it under Pending invoices before selling it again.", [
+			error.invoice,
+		]),
+	);
+	await offlineStore.syncPendingInvoices();
 }
 
 function close() {
@@ -1260,10 +1956,15 @@ function close() {
 }
 
 function roundCurrency(value: number): number {
-	return Math.round((value + Number.EPSILON) * 100) / 100;
+	return roundFor(invoiceCurrency.value, value);
 }
 
 function formatPrice(price: number | string) {
-	return roundCurrency(parseFloat(String(price) || "0")).toFixed(2);
+	return formatFor(invoiceCurrency.value, parseFloat(String(price) || "0"));
+}
+
+/** The same amount with the currency symbol, on the side the Currency doctype asks for. */
+function money(price: number | string) {
+	return formatWithSymbol(invoiceCurrency.value, parseFloat(String(price) || "0"));
 }
 </script>

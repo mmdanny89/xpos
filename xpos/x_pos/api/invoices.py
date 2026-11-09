@@ -7,6 +7,7 @@ import frappe
 from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 from frappe import _
 
+from xpos.api.invoices import ensure_invoice_doctype, get_pos_invoice
 from xpos.x_pos.api.invoice_processing.creation import update_invoice
 from xpos.x_pos.api.invoice_processing.utils import get_latest_rate
 from xpos.x_pos.api.utils import log_perf_event
@@ -14,6 +15,7 @@ from xpos.x_pos.api.utils import log_perf_event
 
 @frappe.whitelist()
 def get_draft_invoices(pos_opening_shift: str, doctype: str = "Sales Invoice"):
+	ensure_invoice_doctype(doctype)
 	started_at = time.perf_counter()
 	filters = {
 		"pos_opening_shift": pos_opening_shift,
@@ -51,7 +53,7 @@ def get_draft_invoices(pos_opening_shift: str, doctype: str = "Sales Invoice"):
 @frappe.whitelist()
 def get_draft_invoice_doc(invoice_name: str, doctype: str = "Sales Invoice"):
 	started_at = time.perf_counter()
-	doc = frappe.get_cached_doc(doctype, invoice_name)
+	doc = get_pos_invoice(doctype, invoice_name)
 	log_perf_event(
 		"get_draft_invoice_doc",
 		started_at,
@@ -60,23 +62,6 @@ def get_draft_invoice_doc(invoice_name: str, doctype: str = "Sales Invoice"):
 		items=len(getattr(doc, "items", []) or []),
 	)
 	return doc
-
-
-@frappe.whitelist()
-def delete_invoice(invoice: str):
-	doctype = "Sales Invoice"
-	if frappe.db.exists("POS Invoice", invoice):
-		doctype = "POS Invoice"
-	elif not frappe.db.exists("Sales Invoice", invoice):
-		frappe.throw(_("Invoice {0} does not exist").format(invoice))
-
-	if frappe.db.has_column(doctype, "pos_is_printed") and frappe.get_value(
-		doctype, invoice, "pos_is_printed"
-	):
-		frappe.throw(_("This invoice {0} cannot be deleted").format(invoice))
-
-	frappe.delete_doc(doctype, invoice, force=1)
-	return _("Invoice {0} Deleted").format(invoice)
 
 
 @frappe.whitelist()
@@ -116,18 +101,6 @@ def create_sales_invoice_from_order(sales_order: str):
 	invoice_doc.run_method("set_missing_values")
 	invoice_doc.run_method("calculate_taxes_and_totals")
 	return invoice_doc
-
-
-@frappe.whitelist()
-def delete_sales_invoice(sales_invoice: str):
-	"""Backward-compatible facade for legacy frontend method path."""
-
-	if not sales_invoice:
-		frappe.throw(_("sales_invoice is required"))
-
-	if frappe.db.exists("Sales Invoice", sales_invoice):
-		frappe.delete_doc("Sales Invoice", sales_invoice, force=1)
-	return True
 
 
 @frappe.whitelist()

@@ -1,14 +1,17 @@
+import { newInvoiceId } from "@/services/invoiceSubmission";
 import { defineStore } from "pinia";
 import { ref, computed, watch } from "vue";
 import { call } from "@/services/api";
 import { usePosStore } from "./posStore";
 import { useSettingsStore } from "./settingsStore";
+import { roundFor } from "@/composables/useCurrency";
 import { getCachedItemByCode, getCachedStockForItem } from "@/services/dbBridge";
 import type {
 	CartItem,
 	POSItem,
 	InvoiceData,
 	InvoiceItem,
+	InvoiceChangeLeg,
 	InvoicePayment,
 	POSOffer,
 	POSCoupon,
@@ -16,6 +19,9 @@ import type {
 	DeliveryCharge,
 	ReceiptSnapshot,
 	OpenTab,
+	GiftCardRefund,
+	IssuedGiftCard,
+	RepriceResponse,
 } from "@/types/pos.types";
 import __ from "@/lib/translate";
 import {
@@ -31,7 +37,7 @@ import {
 } from "@/services/pricingService";
 import type { CartPricingLine, FreeItemLine } from "@/services/pricingEngine";
 import { nowDate, toDateOrNow } from "@/utils/datetime";
-import { debounce } from "@/utils";
+import { debounce, isOnline } from "@/utils";
 
 let cartRowSeq = 0;
 
@@ -82,6 +88,12 @@ export const useCartStore = defineStore("cart", () => {
 	const isReturnMode = ref(false);
 	const returnAgainst = ref("");
 	const returnItemCodes = ref<string[]>([]);
+	/** Cards that paid the sale being returned, and how much each may take back. */
+	const returnGiftCards = ref<GiftCardRefund[]>([]);
+	/** A gift card is among this sale's tender, so the total is charged to the cent. */
+	const giftCardTender = ref(false);
+	/** Codes of cards just sold. Shown once, then forgotten: the server keeps only a hash. */
+	const issuedGiftCards = ref<IssuedGiftCard[]>([]);
 	const orderNotes = ref("");
 	const deliveryDate = ref("");
 	const postingDate = ref(nowDate());
@@ -94,6 +106,8 @@ export const useCartStore = defineStore("cart", () => {
 	const appliedCoupon = ref<POSCoupon | null>(null);
 	const couponCode = ref("");
 	const payments = ref<InvoicePayment[]>([]);
+	const changeLegs = ref<InvoiceChangeLeg[]>([]);
+	const changeAmount = ref(0);
 	const currentDraftName = ref("");
 	const currentDraftModified = ref("");
 	const isSavingDraft = ref(false);
@@ -106,6 +120,7 @@ export const useCartStore = defineStore("cart", () => {
 
 	const ruleDiscountPercentage = ref(0);
 	const ruleDiscountAmount = ref(0);
+	const customerDiscountPercentage = ref(0);
 	const applyDiscountOn = ref("Grand Total");
 	const isPricingCart = ref(false);
 	const pricingSource = ref<PricingSource>("server");
@@ -128,13 +143,27 @@ export const useCartStore = defineStore("cart", () => {
 		return evaluateOffers(appliedOffers.value, items.value);
 	});
 
+	const firedOffers = computed(() => {
+		const ev = offerEvaluation.value;
+		const fired = new Set(
+			[...ev.itemDiscounts, ...ev.freeItems, ...ev.grandTotalDiscounts, ...ev.loyaltyAwards].map(
+				(row) => row.offer_name,
+			),
+		);
+		return appliedOffers.value.filter(
+			(o) => fired.has(o.name) || (o as Record<string, unknown>).promo_source === "Promotional Scheme",
+		);
+	});
+
 	const offerItemDiscountTotal = computed(() => {
 		const eval_ = offerEvaluation.value;
 		if (!eval_.itemDiscounts.length) return 0;
 
 		let total = 0;
 		for (const disc of eval_.itemDiscounts) {
-			const item = items.value.find((i) => i.item_code === disc.item_code);
+			const item = items.value.find((i) =>
+				disc.uid ? i.uid === disc.uid : i.item_code === disc.item_code,
+			);
 			if (!item) continue;
 			const lineAmt = Math.abs(item.qty) * item.rate;
 			if (disc.fixed_rate !== null) {
@@ -169,8 +198,17 @@ export const useCartStore = defineStore("cart", () => {
 		}, 0),
 	);
 
+	/** Sells a gift card, or returns one: money, not goods, so no tax and no rounding. */
+	const isGiftCardSale = computed(() => {
+		const giftItem = usePosStore().giftCards?.item;
+		return items.value.some(
+			(item) => item.gift_card_issue || item.gift_card || (!!giftItem && item.item_code === giftItem),
+		);
+	});
+
 	const calculatedTaxes = computed(() => {
 		const posStore = usePosStore();
+		if (isGiftCardSale.value) return [];
 		const taxDetails = posStore.taxes || [];
 		const taxInclusive = posStore.taxInclusiveMode;
 
@@ -299,10 +337,11 @@ export const useCartStore = defineStore("cart", () => {
 			total += selectedDeliveryCharge.value.rate || 0;
 		}
 		total = isReturnMode.value ? total : Math.max(0, total);
-		if (!posStore.disableRoundedTotal && total !== 0) {
+		// card value is exact money, so a sale that sells or spends one is never rounded
+		if (!posStore.disableRoundedTotal && total !== 0 && !isGiftCardSale.value && !giftCardTender.value) {
 			total = Math.round(total * 100) / 100;
 		}
-		return total;
+		return roundFor(posStore.invoiceCurrency || posStore.currency, total);
 	});
 
 	const isEmpty = computed(() => items.value.length === 0);
@@ -359,7 +398,7 @@ export const useCartStore = defineStore("cart", () => {
 		if (!posStore.blockSaleBeyondAvailableQty) {
 			return { allowed: true };
 		}
-		if (Number(item.is_stock_item) === 0) {
+		if (Number(item.is_stock_item) === 0 || Number(item.allow_negative_stock)) {
 			return { allowed: true };
 		}
 
@@ -414,7 +453,9 @@ export const useCartStore = defineStore("cart", () => {
 			return { valid: true, messages: [] };
 		}
 
-		const stockItems = items.value.filter((i: CartItem) => Number(i.is_stock_item) !== 0);
+		const stockItems = items.value.filter(
+			(i: CartItem) => Number(i.is_stock_item) !== 0 && !Number(i.allow_negative_stock),
+		);
 		if (stockItems.length === 0) {
 			return { valid: true, messages: [] };
 		}
@@ -438,6 +479,7 @@ export const useCartStore = defineStore("cart", () => {
 
 		const messages: string[] = [];
 		for (const [itemCode, available] of freshMap) {
+			if (!stockItems.some((i: CartItem) => i.item_code === itemCode)) continue;
 			const required = committedStockQty(itemCode);
 			if (required > available) {
 				const row = stockItems.find((i: CartItem) => i.item_code === itemCode);
@@ -484,6 +526,9 @@ export const useCartStore = defineStore("cart", () => {
 	}
 
 	function addItem(item: POSItem): { success: boolean; message?: string } {
+		if (isGiftCardSale.value) {
+			return { success: false, message: __("Sell gift cards on their own sale, without other items.") };
+		}
 		if (
 			isReturnMode.value &&
 			returnItemCodes.value.length > 0 &&
@@ -530,6 +575,56 @@ export const useCartStore = defineStore("cart", () => {
 		}
 
 		return { success: true };
+	}
+
+	function addGiftCardLine(amount: number): { success: boolean; message?: string } {
+		const config = usePosStore().giftCards;
+		if (!config)
+			return { success: false, message: __("Gift cards are not enabled on this POS Profile.") };
+		if (isReturnMode.value || items.value.some((item) => !item.gift_card_issue)) {
+			return { success: false, message: __("Sell gift cards on their own sale, without other items.") };
+		}
+		const value = normalizeItemRate(amount);
+		if (!(value > 0)) return { success: false, message: __("Enter the value of the gift card.") };
+		if (config.min_amount && value < config.min_amount) {
+			return {
+				success: false,
+				message: __("The minimum gift card value is {0}.", [config.min_amount]),
+			};
+		}
+		if (config.max_amount && value > config.max_amount) {
+			return {
+				success: false,
+				message: __("The maximum gift card value is {0}.", [config.max_amount]),
+			};
+		}
+		items.value.push({
+			uid: nextRowId(),
+			item_code: config.item,
+			item_name: __("Gift Card"),
+			rate: value,
+			qty: 1,
+			uom: "Nos",
+			stock_uom: "Nos",
+			discount_percentage: 0,
+			discount_amount: 0,
+			is_stock_item: false,
+			conversion_factor: 1,
+			gift_card_issue: true,
+		});
+		return { success: true };
+	}
+
+	function setGiftCardTender(active: boolean): void {
+		giftCardTender.value = active;
+	}
+
+	function showIssuedGiftCards(cards: IssuedGiftCard[]): void {
+		issuedGiftCards.value = cards;
+	}
+
+	function dismissIssuedGiftCards(): void {
+		issuedGiftCards.value = [];
 	}
 
 	function canAddItemWithDetails(
@@ -655,6 +750,7 @@ export const useCartStore = defineStore("cart", () => {
 	function updateItemRate(index: number, rate: number): void {
 		items.value[index].rate = normalizeItemRate(rate);
 		items.value[index].pos_rate_overridden = true;
+		items.value[index].pos_price_unavailable = false;
 	}
 
 	function updateItemDiscount(index: number, type: "percentage" | "amount", value: number): void {
@@ -714,6 +810,7 @@ export const useCartStore = defineStore("cart", () => {
 		}
 		ruleDiscountPercentage.value = 0;
 		ruleDiscountAmount.value = 0;
+		customerDiscountPercentage.value = 0;
 	}
 
 	function enterReturnMode(invoiceName: string, allowedItemCodes?: string[]): void {
@@ -977,7 +1074,7 @@ export const useCartStore = defineStore("cart", () => {
 					customer: customer.value?.name,
 					customer_group: customer.value?.customer_group,
 					territory: customer.value?.territory,
-					price_list: posStore.sellingPriceList,
+					price_list: cartPriceList.value,
 					currency: currency.value || posStore.currency,
 					conversion_rate: conversionRate.value,
 					warehouse: posStore.warehouse,
@@ -1023,6 +1120,265 @@ export const useCartStore = defineStore("cart", () => {
 		() => schedulePricingRules(),
 	);
 
+	const effectivePriceList = ref("");
+	const cartPriceList = computed(() => effectivePriceList.value || posStore.sellingPriceList);
+
+	function customerPriceKey(): string {
+		return posStore.forcePriceFromCustomerPriceList && customer.value?.name
+			? `c:${customer.value.name}`
+			: "";
+	}
+
+	function linePriceKey(item: CartItem): string {
+		return item.pos_price_key ?? `|${item.uom || item.stock_uom}`;
+	}
+
+	function isPriceListLine(item: CartItem): boolean {
+		return (
+			!item.pos_is_free_item &&
+			!item.pos_is_offer &&
+			!item.pos_rate_overridden &&
+			!item.gift_card_issue &&
+			!item.gift_card
+		);
+	}
+
+	let priceListRequestId = 0;
+
+	/**
+	 * Re-price lines whose rate came from a different price list than the one the
+	 * current customer resolves to. The server resolves the list (customer →
+	 * customer group → profile); a missing price leaves the line at 0 and flags
+	 * it "price unavailable" so checkout blocks instead of selling it free.
+	 */
+	async function applyCustomerPriceList(): Promise<void> {
+		if (isReturnMode.value) return;
+		const key = customerPriceKey();
+		const stale = items.value.filter(
+			(i) => isPriceListLine(i) && linePriceKey(i) !== `${key}|${i.uom || i.stock_uom}`,
+		);
+		if (!key) effectivePriceList.value = "";
+		if (!stale.length) return;
+
+		const requestId = ++priceListRequestId;
+		if (!isOnline()) {
+			const cached = customer.value as Record<string, unknown> | null;
+			const cachedCustomerList = cached?.pos_price_list ?? cached?.default_price_list;
+			for (const line of stale) {
+				const profilePriced =
+					!key || !cachedCustomerList || cachedCustomerList === posStore.sellingPriceList;
+				const cachedItem = profilePriced ? await getCachedItemByCode(line.item_code) : null;
+				if (cachedItem && (line.uom || line.stock_uom) === cachedItem.stock_uom) {
+					line.rate = normalizeItemRate(cachedItem.rate);
+					line.pos_price_unavailable = false;
+					line.pos_price_state = undefined;
+					line.pos_price_key = `${key}|${line.uom || line.stock_uom}`;
+				} else {
+					line.pos_price_unavailable = true;
+					line.pos_price_state = "needs_connection";
+				}
+			}
+			return;
+		}
+
+		const result = await call<{ price_list: string; prices: Record<string, number | null> }>(
+			"xpos.api.profile_rules.get_customer_line_prices",
+			{
+				pos_profile: posStore.profileName,
+				customer: key ? customer.value?.name : undefined,
+				posting_date: postingDate.value,
+				lines: JSON.stringify(
+					stale.map((i) => ({
+						row_id: i.uid,
+						item_code: i.item_code,
+						uom: i.uom || i.stock_uom,
+						qty: i.qty,
+						batch_no: i.batch_no || undefined,
+					})),
+				),
+			},
+		);
+		if (requestId !== priceListRequestId || !result) return;
+
+		effectivePriceList.value = key ? result.price_list : "";
+		for (const line of stale) {
+			if (!items.value.includes(line) || !isPriceListLine(line)) continue;
+			const price = line.uid ? result.prices[line.uid] : undefined;
+			const unavailable = price === null || price === undefined;
+			line.rate = unavailable ? 0 : normalizeItemRate(price);
+			line.pos_price_unavailable = unavailable;
+			line.pos_price_state = unavailable ? "no_price" : undefined;
+			line.pos_price_key = `${key}|${line.uom || line.stock_uom}`;
+		}
+	}
+
+	const scheduleCustomerPriceList = debounce(() => {
+		applyCustomerPriceList().catch((error) => {
+			console.error("Customer price list repricing failed:", error);
+		});
+	}, 150);
+
+	if (typeof window !== "undefined") {
+		window.addEventListener("online", () => {
+			if (items.value.some((i) => i.pos_price_state === "needs_connection"))
+				scheduleCustomerPriceList();
+		});
+	}
+
+	const repriceReview = ref<RepriceResponse | null>(null);
+	const offerConflict = ref(false);
+
+	function applyServerRepricing(response: RepriceResponse): void {
+		const key = customerPriceKey();
+		for (const change of response.lines) {
+			const item =
+				(change.row_id && items.value.find((i) => i.uid === change.row_id)) ||
+				items.value[change.index];
+			if (!item || item.item_code !== change.item_code || change.rate === null) continue;
+			item.pos_repriced_from = change.quoted_rate;
+			if (change.price_list_rate !== null) item.rate = normalizeItemRate(change.price_list_rate);
+			item.discount_percentage = change.discount_percentage || 0;
+			item.discount_amount = item.discount_percentage ? 0 : change.discount_amount || 0;
+			item.pos_price_unavailable = false;
+			item.pos_price_state = undefined;
+			// Priced by the server for this customer; the price-list watcher must not undo it.
+			item.pos_price_key = `${key}|${item.uom || item.stock_uom}`;
+		}
+		const hasOfferDiscount = offerItemDiscountTotal.value > 0 || offerGrandTotalDiscountPct.value > 0;
+		if (response.discount_changed && !hasOfferDiscount) {
+			discountPercentage.value = response.additional_discount_percentage || 0;
+			discountAmount.value = discountPercentage.value ? 0 : response.discount_amount || 0;
+		}
+		offerConflict.value = !!response.offer_conflict && hasOfferDiscount;
+		repriceReview.value = response;
+	}
+
+	function acknowledgeRepricing(): void {
+		repriceReview.value = null;
+		for (const item of items.value) item.pos_repriced_from = undefined;
+	}
+
+	watch(
+		() =>
+			[
+				customerPriceKey(),
+				items.value
+					.filter(isPriceListLine)
+					.map((i) => `${i.uid}:${i.uom}:${linePriceKey(i)}`)
+					.join("|"),
+			].join("~"),
+		() => scheduleCustomerPriceList(),
+	);
+
+	function customerDiscountRate(): number {
+		if (isReturnMode.value || !posStore.applyCustomerDiscount) return 0;
+		const rate = Number((customer.value as Record<string, unknown> | null)?.discount || 0);
+		const cap = Number(posStore.maxDiscountAllowed || 0);
+		return cap > 0 ? Math.min(rate, cap) : rate;
+	}
+
+	/**
+	 * Apply the customer's Discount (%) as the invoice discount.
+	 *
+	 * Precedence: a pricing-rule transaction discount or a grand-total offer owns
+	 * the invoice discount; a manual discount replaces the customer one. The
+	 * value is assigned, never added, so restores and recalculations cannot stack it.
+	 */
+	function syncCustomerDiscount(): void {
+		const owned =
+			customerDiscountPercentage.value > 0 &&
+			discountPercentage.value === customerDiscountPercentage.value &&
+			!discountAmount.value;
+		const target = customerDiscountRate();
+		const ruleOwned =
+			ruleDiscountPercentage.value > 0 ||
+			ruleDiscountAmount.value > 0 ||
+			offerGrandTotalDiscountPct.value > 0;
+
+		if (!owned) {
+			customerDiscountPercentage.value = 0;
+			// A restored draft that already carries exactly this discount is still the customer's.
+			if (target && !ruleOwned && !discountAmount.value && discountPercentage.value === target) {
+				customerDiscountPercentage.value = target;
+				return;
+			}
+			if (discountPercentage.value || discountAmount.value) return;
+		}
+
+		if (!target || ruleOwned) {
+			if (owned) discountPercentage.value = 0;
+			customerDiscountPercentage.value = 0;
+			return;
+		}
+		discountPercentage.value = target;
+		customerDiscountPercentage.value = target;
+	}
+
+	watch(
+		() =>
+			[
+				customer.value?.name || "",
+				(customer.value as Record<string, unknown> | null)?.discount ?? "",
+				posStore.applyCustomerDiscount,
+				posStore.maxDiscountAllowed,
+				ruleDiscountPercentage.value,
+				ruleDiscountAmount.value,
+				offerGrandTotalDiscountPct.value,
+				discountPercentage.value,
+				discountAmount.value,
+				isReturnMode.value,
+			].join("~"),
+		() => syncCustomerDiscount(),
+	);
+
+	/** Lines checkout must refuse: unresolved prices, and zero-price lines the profile does not allow. */
+	const pricingIssues = computed<string[]>(() => {
+		if (isReturnMode.value) return [];
+		const issues: string[] = [];
+		if (repriceReview.value) {
+			issues.push(__("Prices changed. Review the updated prices before taking payment."));
+		}
+		if (
+			offerConflict.value &&
+			(offerItemDiscountTotal.value > 0 || offerGrandTotalDiscountPct.value > 0)
+		) {
+			issues.push(
+				__(
+					"A pricing rule sets this sale's invoice discount, which cannot be combined with POS Offers. Remove the offers to continue.",
+				),
+			);
+		}
+		let saleLines = 0;
+		for (const item of items.value) {
+			if (item.pos_is_free_item || item.pos_is_offer || item.gift_card_issue || item.gift_card)
+				continue;
+			saleLines++;
+			if (item.pos_price_unavailable && !item.pos_rate_overridden) {
+				const name = item.item_name || item.item_code;
+				issues.push(
+					item.pos_price_state === "needs_connection"
+						? __("{0}: connect to the server to get this customer's price", [name])
+						: __("{0}: no price is configured in price list {1}", [name, cartPriceList.value]),
+				);
+				continue;
+			}
+			const netRate = item.discount_percentage
+				? item.rate * (1 - item.discount_percentage / 100)
+				: item.rate - (item.discount_amount || 0);
+			if (netRate <= 0 && !posStore.allowZeroRatedItems) {
+				issues.push(
+					__("{0} has a zero price, which this POS Profile does not allow", [
+						item.item_name || item.item_code,
+					]),
+				);
+			}
+		}
+		if (saleLines && !issues.length && !posStore.allowZeroRatedItems && grandTotal.value <= 0) {
+			issues.push(__("This sale totals zero, which this POS Profile does not allow"));
+		}
+		return issues;
+	});
+
 	function clearAllDiscounts(): void {
 		discountPercentage.value = 0;
 		discountAmount.value = 0;
@@ -1056,6 +1412,16 @@ export const useCartStore = defineStore("cart", () => {
 
 	function clearPayments(): void {
 		payments.value = [];
+		changeLegs.value = [];
+		changeAmount.value = 0;
+	}
+
+	function setChangeLegs(legs: InvoiceChangeLeg[]): void {
+		changeLegs.value = legs;
+	}
+
+	function setChangeAmount(amount: number): void {
+		changeAmount.value = amount;
 	}
 
 	function setCurrency(curr: string, rate: number): void {
@@ -1064,12 +1430,17 @@ export const useCartStore = defineStore("cart", () => {
 	}
 
 	function clearCart(): void {
+		invoiceLocalId = "";
 		items.value = [];
+		effectivePriceList.value = "";
+		repriceReview.value = null;
+		offerConflict.value = false;
 		selectedCartIndex.value = -1;
 		discountPercentage.value = 0;
 		discountAmount.value = 0;
 		ruleDiscountPercentage.value = 0;
 		ruleDiscountAmount.value = 0;
+		customerDiscountPercentage.value = 0;
 		applyDiscountOn.value = "Grand Total";
 		pricingSource.value = "server";
 		clearLoyalty();
@@ -1082,11 +1453,15 @@ export const useCartStore = defineStore("cart", () => {
 		postingDate.value = nowDate();
 		salesPerson.value = "";
 		payments.value = [];
+		changeLegs.value = [];
+		changeAmount.value = 0;
 		currentDraftName.value = "";
 		currentDraftModified.value = "";
 		currency.value = "";
 		conversionRate.value = 1;
 		selectedDeliveryCharge.value = null;
+		giftCardTender.value = false;
+		returnGiftCards.value = [];
 	}
 
 	function clearAll(): void {
@@ -1220,6 +1595,9 @@ export const useCartStore = defineStore("cart", () => {
 			if (result.pos_delivery_date) {
 				deliveryDate.value = result.pos_delivery_date;
 			}
+			if (result.sales_person) {
+				salesPerson.value = result.sales_person;
+			}
 			if (result.pos_delivery_charges) {
 				selectedDeliveryCharge.value = {
 					name: result.pos_delivery_charges,
@@ -1292,12 +1670,15 @@ export const useCartStore = defineStore("cart", () => {
 		}
 	}
 
+	let invoiceLocalId = "";
 	function getInvoiceData(posProfile: string, posOpeningShift: string): InvoiceData {
 		const data: InvoiceData = {
+			local_id: invoiceLocalId || (invoiceLocalId = newInvoiceId()),
 			pos_profile: posProfile,
 			customer: customer.value?.name || "",
 			items: items.value.map(
 				(item: CartItem): InvoiceItem => ({
+					row_id: item.uid,
 					item_code: item.item_code,
 					item_name: item.item_name,
 					local_item_name: item.local_item_name,
@@ -1317,6 +1698,9 @@ export const useCartStore = defineStore("cart", () => {
 					is_replace: item.pos_is_replace,
 					is_free_item: item.pos_is_free_item ? 1 : undefined,
 					pricing_rules: item.pos_free_item_rule,
+					gift_card_issue:
+						item.gift_card_issue || item.item_code === posStore.giftCards?.item ? 1 : undefined,
+					gift_card: item.gift_card,
 				}),
 			),
 			pos_opening_shift: posOpeningShift,
@@ -1327,6 +1711,14 @@ export const useCartStore = defineStore("cart", () => {
 		};
 
 		const _hasOfferDisc = offerItemDiscountTotal.value > 0 || offerGrandTotalDiscountPct.value > 0;
+		if (
+			!_hasOfferDisc &&
+			customerDiscountPercentage.value > 0 &&
+			discountPercentage.value === customerDiscountPercentage.value
+		) {
+			// Lets the server check it against the customer's own Discount (%).
+			data.discount_source = "customer";
+		}
 		if (_hasOfferDisc) {
 			let totalDisc = offerItemDiscountTotal.value;
 			let remaining = subtotal.value + taxAmount.value - totalDisc;
@@ -1356,6 +1748,14 @@ export const useCartStore = defineStore("cart", () => {
 
 		if (payments.value.length > 0) {
 			data.payments = payments.value;
+		}
+
+		if (changeAmount.value > 0) {
+			data.change_amount = changeAmount.value;
+		}
+
+		if (changeLegs.value.length > 0) {
+			data.pos_change_legs = changeLegs.value;
 		}
 
 		if (orderNotes.value) data.pos_notes = orderNotes.value;
@@ -1396,9 +1796,9 @@ export const useCartStore = defineStore("cart", () => {
 			];
 		}
 
-		if (appliedOffers.value.length > 0) {
-			data.offers = JSON.stringify(appliedOffers.value.map((o) => o.name));
-			data.offers_detail = appliedOffers.value.map((o) => ({
+		if (firedOffers.value.length > 0) {
+			data.offers = JSON.stringify(firedOffers.value.map((o) => o.name));
+			data.offers_detail = firedOffers.value.map((o) => ({
 				offer_name: o.name,
 				offer:
 					(o as Record<string, unknown>).offer || (o as Record<string, unknown>).offer_type || "",
@@ -1408,7 +1808,7 @@ export const useCartStore = defineStore("cart", () => {
 			}));
 		}
 
-		if (selectedDeliveryCharge.value) {
+		if (selectedDeliveryCharge.value && posStore.useDeliveryCharges && !isReturnMode.value) {
 			data.pos_delivery_charges = selectedDeliveryCharge.value.name;
 			data.pos_delivery_charges_rate = selectedDeliveryCharge.value.rate;
 		}
@@ -1463,13 +1863,26 @@ export const useCartStore = defineStore("cart", () => {
 			})),
 			payments: payments.value
 				.filter((p) => p.amount)
-				.map((p) => ({ mode_of_payment: p.mode_of_payment, amount: p.amount })),
+				.map((p) => ({
+					mode_of_payment: p.mode_of_payment,
+					amount: p.amount,
+					...(p.pos_tender_currency
+						? {
+								currency: p.pos_tender_currency,
+								native_amount: p.pos_tender_amount,
+								exchange_rate: p.pos_exchange_rate,
+								rate_date: posStore.tenderModeFor(p.mode_of_payment)?.rate_date || "",
+							}
+						: {}),
+				})),
 			subtotal: Math.round(subtotal.value * 100) / 100,
 			total_discount: totalDiscount,
 			net_total: Math.round((subtotal.value + includedTaxAmount.value) * 100) / 100,
 			grand_total: grandTotal.value,
 			total_qty: totalQty,
 			change: change > 0.01 && !isReturnMode.value ? Math.round(change * 100) / 100 : 0,
+			change_legs: changeLegs.value.length ? changeLegs.value : undefined,
+			currency: currency.value || posStore.currency || undefined,
 			notes: orderNotes.value || undefined,
 		};
 	}
@@ -1481,6 +1894,14 @@ export const useCartStore = defineStore("cart", () => {
 	return {
 		items,
 		customer,
+		returnGiftCards,
+		giftCardTender,
+		isGiftCardSale,
+		addGiftCardLine,
+		setGiftCardTender,
+		issuedGiftCards,
+		showIssuedGiftCards,
+		dismissIssuedGiftCards,
 		discountPercentage,
 		discountAmount,
 		showPaymentDialog,
@@ -1499,6 +1920,8 @@ export const useCartStore = defineStore("cart", () => {
 		appliedCoupon,
 		couponCode,
 		payments,
+		changeLegs,
+		changeAmount,
 		selectedCartIndex,
 		currentDraftName,
 		currentDraftModified,
@@ -1528,6 +1951,14 @@ export const useCartStore = defineStore("cart", () => {
 		hasOffers,
 		canAddItem,
 		revalidateStock,
+		pricingIssues,
+		cartPriceList,
+		repriceReview,
+		offerConflict,
+		applyServerRepricing,
+		acknowledgeRepricing,
+		customerDiscountPercentage,
+		applyCustomerPriceList,
 		getStockReservations,
 		canAddItemWithDetails,
 		addItem,
@@ -1558,6 +1989,8 @@ export const useCartStore = defineStore("cart", () => {
 		addPayment,
 		setPayments,
 		clearPayments,
+		setChangeLegs,
+		setChangeAmount,
 		setCurrency,
 		clearCart,
 		clearAll,

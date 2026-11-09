@@ -1,4 +1,5 @@
 import type { ReportColumn, ReportFilterDefinition } from "@/services/reports";
+import { formatQty as formatNumberQty } from "@/utils/numberFormat";
 
 export interface ThermalReportOptions {
 	title: string;
@@ -33,7 +34,7 @@ function pickQtyColumn(columns: ReportColumn[]): ReportColumn | undefined {
 function formatQty(value: unknown): string {
 	const qty = Number(value ?? 0);
 	if (Number.isNaN(qty)) return String(value ?? "0");
-	return qty % 1 === 0 ? String(qty) : qty.toFixed(2);
+	return formatNumberQty(qty);
 }
 
 function buildFilterLines(filters: ReportFilterDefinition[], values: Record<string, unknown>): string {
@@ -49,7 +50,7 @@ function buildFilterLines(filters: ReportFilterDefinition[], values: Record<stri
 }
 
 function itemLine(row: Record<string, unknown>, itemColumn?: ReportColumn, qtyColumn?: ReportColumn): string {
-	const name = String((itemColumn && row[itemColumn.fieldname]) || row.item_name || row.item_code || "—");
+	const name = String((itemColumn && row[itemColumn.fieldname]) || row.item_name || row.item_code || "-");
 	const qty = qtyColumn ? formatQty(row[qtyColumn.fieldname]) : "";
 	return `<div class="item-row"><span class="item-name">${name}</span><span class="item-qty">${qty}</span></div>`;
 }
@@ -65,7 +66,7 @@ function buildBody(columns: ReportColumn[], rows: Record<string, unknown>[]): st
 
 	const warehouseMap = new Map<string, Record<string, unknown>[]>();
 	for (const row of rows) {
-		const warehouse = String(row.warehouse || "—");
+		const warehouse = String(row.warehouse || "-");
 		if (!warehouseMap.has(warehouse)) warehouseMap.set(warehouse, []);
 		warehouseMap.get(warehouse)!.push(row);
 	}

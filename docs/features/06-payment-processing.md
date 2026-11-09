@@ -9,12 +9,12 @@ X POS supports flexible payment processing with multiple payment methods, split 
 Clicking the **Pay** button opens a full-screen payment dialog where you complete the transaction.
 
 ### Dialog Layout
-- **Amount Due / Refund Amount** — Large, prominent display of the total amount to be paid (or refunded for returns)
-- **Tax Summary** — Subtotal, individual tax lines with inclusive indicators
-- **Payment Method Selector** — Buttons for each configured mode of payment
-- **Amount Input** — Editable field for the tendered amount
-- **Quick Amount Buttons** — Pre-calculated rounded amounts near the total
-- **On-Screen Numpad** — Touch-friendly number pad (hidden on mobile devices for space)
+- **Amount Due / Refund Amount** - Large, prominent display of the total amount to be paid (or refunded for returns)
+- **Tax Summary** - Subtotal, individual tax lines with inclusive indicators
+- **Payment Method Selector** - Buttons for each configured mode of payment
+- **Amount Input** - Editable field for the tendered amount
+- **Quick Amount Buttons** - Pre-calculated rounded amounts near the total
+- **On-Screen Numpad** - Touch-friendly number pad (hidden on mobile devices for space)
 
 ---
 
@@ -29,7 +29,7 @@ Payment modes are configured in the POS Profile and typically include:
 | Bank Transfer | Building | Direct bank transfers |
 | Mobile Money | Phone | Mobile money payments |
 | Check | Document | Payment by check |
-| Custom modes | — | Any other mode defined in ERPNext |
+| Custom modes | - | Any other mode defined in ERPNext |
 
 ### Selecting a Payment Method
 - Click the payment method button to select it
@@ -44,10 +44,10 @@ Payment modes are configured in the POS Profile and typically include:
 2. The **tendered amount** auto-fills with the grand total
 3. Adjust the amount if the customer pays a different amount
 4. **Quick amount buttons** offer convenient options:
-   - **Exact amount** — Matches the grand total exactly
-   - **Next 10** — Rounds up to the nearest 10
-   - **Next 50** — Rounds up to the nearest 50
-   - **Next 100** — Rounds up to the nearest 100
+   - **Exact amount** - Matches the grand total exactly
+   - **Next 10** - Rounds up to the nearest 10
+   - **Next 50** - Rounds up to the nearest 50
+   - **Next 100** - Rounds up to the nearest 100
 5. If the tendered amount exceeds the grand total, the **change amount** is automatically calculated and displayed
 
 ---
@@ -98,6 +98,85 @@ Clicking a quick button fills the tendered amount and auto-calculates change.
 
 ---
 
+## Mixed-Currency Cash Payment and Change
+
+Some stores take more than one currency of cash across the same counter: a Beirut shop prices in
+LBP but accepts US dollar notes at a rate the owner sets by hand each morning. Turning on
+`pos_mixed_currency_tender` in the POS Profile lets one invoice be settled with a mix of both, and
+lets the change go back as a mix of both.
+
+**The invoice itself stays single-currency.** Only the payment legs are mixed. This is not the same
+feature as `allow_multi_currency`, which switches the whole invoice into another currency - see
+[Multi-Currency](19-multi-currency.md) for the distinction.
+
+### Setup
+
+| Setting | Where | Why |
+|---|---|---|
+| `pos_tender_currency` | Mode of Payment | Tags the mode as taking foreign notes. Blank means the invoice currency. |
+| `type = Cash` | Mode of Payment | Change can only be handed back through a cash mode. |
+| Mode of Payment Account | Mode of Payment | Must point at a **company-currency** cash account, shared by both modes. |
+| `pos_mixed_currency_tender` | POS Profile | Shows the change allocator. |
+| `cash_mode_of_payment` | POS Profile | The drawer change comes out of by default. |
+| `post_change_gl_entries` | POS Settings | Must stay enabled. A server guard refuses the sale if it is turned off. |
+| Currency Exchange record | Daily | One row per day, with **For Selling** ticked. |
+
+The drawer is a single company-currency account. The dollar figure is reconciliation metadata, not
+a second ledger: there is no FX gain or loss tracking.
+
+### Taking the payment
+
+1. Select the foreign cash mode. The tendered field switches to that currency's own decimals.
+2. Type the note value the customer handed over, e.g. `100`.
+3. A line underneath shows the conversion and the rate's date: `$100.00 at 90,000 = L£9,000,000`.
+   An amber warning appears if the rate was not set today.
+4. The change due is calculated in the invoice currency as usual.
+
+### Splitting the change
+
+When change is due, the allocator lists one row per currency being handed back.
+
+1. A single row in the invoice currency is seeded automatically, so the ordinary case needs no
+   interaction at all.
+2. Edit that row down and click a currency button to add another leg. The button shows what the
+   outstanding change works out to in that currency, so the cashier does not have to divide.
+3. The legs must account for the change exactly, within one minor unit of the invoice currency.
+   The submit button stays disabled until they do.
+
+### Worked example
+
+Invoice 5,892,300 LBP. Customer hands over a $100 note at 90,000.
+
+| Leg | Native | In LBP |
+|---|---|---|
+| Tender - Cash USD | $100.00 | 9,000,000 |
+| Change - Cash USD | $30.00 | 2,700,000 |
+| Change - Cash LBP | 407,700 | 407,700 |
+
+The drawer nets **+$70 and −407,700 LBP**, and `70 × 90,000 − 407,700` is 5,892,300 exactly.
+
+### What gets recorded
+
+| Field | Holds |
+|---|---|
+| `Sales Invoice Payment.amount` | Always the invoice-currency value. ERPNext sums it into `paid_amount`. |
+| `pos_tender_currency` / `pos_tender_amount` | The notes actually handed over. ERPNext never touches these. |
+| `pos_exchange_rate` | The rate at submit time, frozen so a later rate change never restates the invoice. |
+| `POS Change Leg` rows | One per currency handed back, positive, summing to `change_amount`. |
+
+The rate is always resolved **server-side**. A rate sent by the till is treated as a checksum: if
+it disagrees with the server's, the sale is rejected and the cashier is told to reload. That is
+also why a foreign-currency invoice queued offline and replayed after the rate changed will error
+loudly and has to be re-rung.
+
+### At shift close
+
+The count sheet asks for each mode in its own currency - `$270` and `592,300 LBP` as separate
+lines, never one blended figure. Change is subtracted from the mode that actually gave it, not
+spread across every mode used on the invoice.
+
+---
+
 ## Loyalty Point Redemption
 
 If the selected customer is enrolled in a loyalty program and has available points:
@@ -111,11 +190,24 @@ If the selected customer is enrolled in a loyalty program and has available poin
 
 ---
 
+## Gift Card Payment
+
+When gift cards are enabled on the POS Profile and the till is online:
+
+1. Click **Pay with Gift Card**, then scan or type the code and click **Apply**
+2. The server returns the card's balance. The lower of the balance and the amount due is added as a split-payment row showing the masked card (`••••-1234`)
+3. Pay any rest with another method. Change is only ever given from cash
+4. Once a card is tendered the total is no longer rounded, so the card pays to the cent
+
+The Gift Card mode never appears as a plain payment button: it can only be used through a checked card. See [Gift Cards](29-gift-cards.md).
+
+---
+
 ## Write-Off
 
 - A small **write-off** field is available when `allow_write_off_change` is enabled
 - Use it to write off minor rounding differences
-- Example: Order total is $10.02, customer pays $10.00 — write off $0.02
+- Example: Order total is $10.02, customer pays $10.00 - write off $0.02
 - Written-off amounts appear as an amber badge in the cart summary
 
 ---
@@ -126,10 +218,12 @@ When `use_customer_credit` is enabled:
 
 1. Available customer credits are shown in the payment dialog
 2. Credits come from:
-   - **Unallocated Payment Entries** — Advance payments from the customer
-   - **Credit Notes** — Refunds or return credits
-3. Select credits to apply toward the current payment
+   - **Unallocated Payment Entries** - Advance payments from the customer
+   - **Credit Notes** - Refunds or return credits
+3. Enter how much to use from each source; the rest can be paid by any other method
 4. The applied credit reduces the amount due
+
+Credit needs a live connection (it is not offered offline or on the desktop app) and Sales Invoice mode. The server re-checks every amount when the sale is saved, so two tills cannot spend the same credit. See [POS Profile Settings: Implementation Status](pos-profile-settings-status.md#business-rules).
 
 ---
 
@@ -143,8 +237,8 @@ When `use_customer_credit` is enabled:
 - Stock validation: checks batch quantities and stock availability
 
 ### Submit Actions
-- **Save & Print** — Creates and submits the invoice, then opens print preview (keyboard: **Enter**)
-- **Save Only** — Creates and submits the invoice without printing (keyboard: **Shift+Enter**)
+- **Save & Print** - Creates and submits the invoice, then opens print preview (keyboard: **Enter**)
+- **Save Only** - Creates and submits the invoice without printing (keyboard: **Shift+Enter**)
 
 ### What Happens After Submit
 1. The invoice is created via the `create_invoice` API

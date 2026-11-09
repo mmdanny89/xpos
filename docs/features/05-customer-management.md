@@ -1,6 +1,6 @@
 # Customer Management
 
-X POS provides full customer management directly from the POS screen — search existing customers, create new ones, view details, and manage loyalty programs.
+X POS provides full customer management directly from the POS screen - search existing customers, create new ones, view details, and manage loyalty programs.
 
 ---
 
@@ -24,13 +24,15 @@ X POS provides full customer management directly from the POS screen — search 
   - Email address
 
 ### Keyboard Navigation
-- **Arrow Up / Arrow Down** — Navigate through the customer list
-- **Enter** — Select the highlighted customer
+- **Arrow Up / Arrow Down** - Navigate through the customer list
+- **Enter** - Select the highlighted customer
 - Start typing immediately to filter results
 
 ### Customer Groups
 - If the POS Profile has customer group restrictions, only customers belonging to allowed groups are shown
-- Customer group hierarchy is respected — child groups are included
+- Customer group hierarchy is respected - child groups are included
+- The same limit applies everywhere in the POS, not just the search list. A cashier cannot open, edit, enrol in loyalty, or see the addresses or credit of a customer outside the allowed groups. Asking for one shows a "not permitted" message
+- Users who can open that customer in ERPNext Desk (through their roles and User Permissions) are not limited by the POS Profile's groups
 
 ---
 
@@ -82,12 +84,12 @@ Once a customer is selected, X POS can display:
 - Tax ID
 
 ### Financial Info
-- **Outstanding balance** — Total unpaid amount from GL entries when available at checkout
-- **Customer credit** — Unallocated payment entries and credit notes available for use
+- **Outstanding balance** - Total unpaid amount from GL entries when available at checkout
+- **Customer credit** - Unallocated payment entries and credit notes available for use
 
 ### Customer-Specific Pricing
-- **Customer discount** — A percentage discount stored on the customer record
-- **Customer price list** — If the customer has a specific price list assigned
+- **Customer discount** - A percentage discount stored on the customer record
+- **Customer price list** - If the customer has a specific price list assigned
 - Auto-applied when `apply_customer_discount` is enabled in the POS Profile
 
 ### Addresses
@@ -113,13 +115,24 @@ Once a customer is selected, X POS can display:
 
 X POS tracks customer credit from two sources:
 
-1. **Unallocated Payment Entries** — Advance payments not yet applied to invoices
-2. **Credit Notes** — Return/refund credit available for the customer
+1. **Unallocated Payment Entries** - Advance payments not yet applied to invoices
+2. **Credit Notes** - Return/refund credit available for the customer
 
 ### Using Credit for Payment
 - When `use_customer_credit` is enabled, credit can be applied during checkout
 - Available credits are listed in the payment dialog
 - See [Payment Processing](06-payment-processing.md) for details
+
+---
+
+## Who Can See Which Customers
+
+- A cashier sees only customers inside the **Customer Groups** listed on their POS Profile, including child groups. This holds even when the user also has the Customer permission in the Desk, and for administrators.
+- A POS Profile with no Customer Groups listed has no limit.
+- **User Permissions** (for example on Customer, Company or Address) always still apply. Being on a POS Profile never lifts them.
+- A customer's balance, credit limit and loyalty points are for the **company of the POS Profile** only. Another company's figures for the same customer are never shown.
+- Reading a customer does not allow changing one. Editing, loyalty enrolment and similar changes also need the Customer write permission.
+- Opening an invoice, for returns, repeat orders or history, needs either the matching Desk permission or the invoice's own POS Profile and company, and the user's User Permissions must allow it.
 
 ---
 

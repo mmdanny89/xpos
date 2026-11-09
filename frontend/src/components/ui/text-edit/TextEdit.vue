@@ -5,7 +5,7 @@ import StarterKit from "@tiptap/starter-kit";
 import UnderlineExtension from "@tiptap/extension-underline";
 import LinkExtension from "@tiptap/extension-link";
 import PlaceholderExtension from "@tiptap/extension-placeholder";
-import { onBeforeUnmount, onMounted, ref, watch, type HTMLAttributes } from "vue";
+import { onBeforeUnmount, onMounted, shallowRef, watch, type HTMLAttributes } from "vue";
 import TextEditToolbar from "./TextEditToolbar.vue";
 
 const props = defineProps<{
@@ -16,14 +16,15 @@ const props = defineProps<{
 
 const modelValue = defineModel<string>({ default: "" });
 
-const editor = ref<Editor | null>(null);
+const editor = shallowRef<Editor>();
 
 onMounted(() => {
 	editor.value = new Editor({
 		content: modelValue.value || "",
 		editable: !props.disabled,
 		extensions: [
-			StarterKit,
+			// StarterKit v3 ya trae Underline y Link; se desactivan para usar los configurados abajo.
+			StarterKit.configure({ underline: false, link: false }),
 			UnderlineExtension,
 			LinkExtension.configure({
 				openOnClick: false,
@@ -58,7 +59,7 @@ watch(modelValue, (newValue) => {
 	if (!editor.value) return;
 	const current = editor.value.getHTML();
 	if (newValue !== current) {
-		editor.value.commands.setContent(newValue || "", false);
+		editor.value.commands.setContent(newValue || "", { emitUpdate: false });
 	}
 });
 

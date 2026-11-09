@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS `currencies` (
   `name` VARCHAR(255) NOT NULL PRIMARY KEY,
   `currency_name` VARCHAR(255) DEFAULT NULL,
   `symbol` VARCHAR(10) DEFAULT NULL,
+  `number_format` VARCHAR(20) DEFAULT NULL,
+  `smallest_currency_fraction_value` DECIMAL(18,6) DEFAULT 0,
+  `symbol_on_right` TINYINT(1) DEFAULT 0,
   `enabled` TINYINT(1) DEFAULT 1,
   `modified` DATETIME DEFAULT NULL,
   `synced_at` DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -260,6 +263,8 @@ CREATE TABLE IF NOT EXISTS `customers` (
   `default_currency` VARCHAR(10) DEFAULT NULL,
   `loyalty_program` VARCHAR(255) DEFAULT NULL,
   `loyalty_points` INT DEFAULT 0,
+  `discount` DECIMAL(10,4) DEFAULT 0,
+  `default_price_list` VARCHAR(255) DEFAULT NULL,
   `disabled` TINYINT(1) DEFAULT 0,
   `modified` DATETIME DEFAULT NULL,
   `synced_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -289,9 +294,22 @@ CREATE TABLE IF NOT EXISTS `modes_of_payment` (
   `name` VARCHAR(255) NOT NULL PRIMARY KEY,
   `mode_of_payment` VARCHAR(255) DEFAULT NULL,
   `type` VARCHAR(50) DEFAULT NULL,
+  `pos_tender_currency` VARCHAR(10) DEFAULT NULL,
   `enabled` TINYINT(1) DEFAULT 1,
   `modified` DATETIME DEFAULT NULL,
   `synced_at` DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `currency_exchange_rates` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `from_currency` VARCHAR(10) NOT NULL,
+  `to_currency` VARCHAR(10) NOT NULL,
+  `exchange_rate` DECIMAL(21,9) NOT NULL DEFAULT 0,
+  `date` DATE NOT NULL,
+  `for_selling` TINYINT(1) DEFAULT 0,
+  `modified` DATETIME DEFAULT NULL,
+  `synced_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uniq_rate` (`from_currency`, `to_currency`, `date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `mode_of_payment_accounts` (
@@ -326,11 +344,17 @@ CREATE TABLE IF NOT EXISTS `pos_profiles` (
   `hide_images` TINYINT(1) DEFAULT 0,
   `hide_unavailable_items` TINYINT(1) DEFAULT 0,
   `block_sale_beyond_available_qty` TINYINT(1) DEFAULT 0,
-  `display_items_in_stock` TINYINT(1) DEFAULT 0,
   `cash_mode_of_payment` VARCHAR(255) DEFAULT NULL,
   `apply_customer_discount` TINYINT(1) DEFAULT 0,
   `allow_print_draft_invoices` TINYINT(1) DEFAULT 0,
   `use_offline_mode` TINYINT(1) DEFAULT 0,
+  `force_price_from_customer_price_list` TINYINT(1) DEFAULT 0,
+  `allow_zero_rated_items` TINYINT(1) DEFAULT 0,
+  `use_delivery_charges` TINYINT(1) DEFAULT 0,
+  `auto_set_delivery_charges` TINYINT(1) DEFAULT 0,
+  `max_discount_percentage_allowed` DECIMAL(10,4) DEFAULT 0,
+  `hide_expected_amount` TINYINT(1) DEFAULT 0,
+  `use_customer_credit` TINYINT(1) DEFAULT 0,
   `modified` DATETIME DEFAULT NULL,
   `synced_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   INDEX `idx_company` (`company`),
@@ -479,6 +503,7 @@ CREATE TABLE IF NOT EXISTS `pos_users` (
   `close_shift` TINYINT(1) DEFAULT 0,
   `allow_reprint_invoice` TINYINT(1) DEFAULT 0,
   `shift_report` TINYINT(1) DEFAULT 0,
+  `view_expected_amount` TINYINT(1) DEFAULT 0,
   `allow_cancel_invoice` TINYINT(1) DEFAULT 0,
   `unsettled_invoices` TINYINT(1) DEFAULT 0,
   `apply_additional_discount` TINYINT(1) DEFAULT 0,
@@ -634,6 +659,20 @@ CREATE TABLE IF NOT EXISTS `sales_invoice_payments` (
   `mode_of_payment` VARCHAR(255) DEFAULT NULL,
   `amount` DECIMAL(18,6) DEFAULT 0,
   `account` VARCHAR(255) DEFAULT NULL,
+  `pos_tender_currency` VARCHAR(10) DEFAULT NULL,
+  `pos_tender_amount` DECIMAL(18,6) DEFAULT NULL,
+  `pos_exchange_rate` DECIMAL(21,9) DEFAULT NULL,
+  INDEX `idx_parent_id` (`parent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `sales_invoice_change_legs` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `parent_id` INT NOT NULL,
+  `mode_of_payment` VARCHAR(255) DEFAULT NULL,
+  `currency` VARCHAR(10) DEFAULT NULL,
+  `amount` DECIMAL(18,6) DEFAULT 0,
+  `base_amount` DECIMAL(18,6) DEFAULT 0,
+  `exchange_rate` DECIMAL(21,9) DEFAULT NULL,
   INDEX `idx_parent_id` (`parent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -4,10 +4,41 @@ import { getCachedReceiptContext } from "@/services/dbBridge";
 import { buildReceiptHtml } from "@/services/receiptTemplate";
 import type { ReceiptSnapshot } from "@/types/pos.types";
 import { __ } from "@/lib/translate";
+import { get_full_url } from "@/utils";
 
 export interface PrintInvoiceOptions {
 	format?: string;
 	doctype?: "Sales Invoice" | "POS Invoice";
+}
+
+/**
+ * Print an HTML document from a hidden iframe. Unlike window.open, this is not caught by
+ * popup blockers after an await, and needs no network.
+ */
+export function printHtml(html: string): HTMLIFrameElement {
+	const frame = document.createElement("iframe");
+	frame.setAttribute("aria-hidden", "true");
+	Object.assign(frame.style, {
+		position: "fixed",
+		right: "0",
+		bottom: "0",
+		width: "0",
+		height: "0",
+		border: "0",
+	});
+	frame.onload = () => {
+		const win = frame.contentWindow;
+		if (!win) return;
+		win.onafterprint = () => setTimeout(() => frame.remove(), 0);
+		// Give the logo a moment to load before the print dialog snapshots the page.
+		setTimeout(() => {
+			win.focus();
+			win.print();
+		}, 250);
+	};
+	frame.srcdoc = html;
+	document.body.appendChild(frame);
+	return frame;
 }
 
 /**
@@ -21,11 +52,44 @@ export function usePrintInvoice() {
 		return xpos.boot?.pos_settings?.invoice_type === "POS Invoice" ? "POS Invoice" : "Sales Invoice";
 	}
 
+	/** The format the POS Profile's print rules pick for this invoice (online), else the default. */
+	async function resolveInvoicePrintFormat(doctype: string, name: string): Promise<string> {
+		try {
+			const result = await call<{ print_format: string }>(
+				"xpos.api.print_formats.get_invoice_print_format",
+				{ doctype, name },
+			);
+			if (result?.print_format) return result.print_format;
+		} catch {
+			/* offline or no read access: fall back to the profile default */
+		}
+		return posStore?.defaultPrintFormat || "XPOS Thermal Receipt";
+	}
+
+	/**
+	 * Open the server print view (reprints included) with the rule-selected format.
+	 * The window is opened before the lookup so the click still counts as user-initiated.
+	 */
+	async function openInvoicePrintView(
+		name: string,
+		doctype: string = posStore.invoiceType || resolveDoctype(),
+	) {
+		const printWindow = window.open("about:blank", "_blank");
+		const format = await resolveInvoicePrintFormat(doctype, name);
+		const url = get_full_url(
+			`/printview?doctype=${encodeURIComponent(doctype)}&name=${encodeURIComponent(name)}&format=${encodeURIComponent(
+				format,
+			)}&no_letterhead=0&trigger_print=1`,
+		);
+		if (printWindow) printWindow.location.href = url;
+		else window.open(url, "_blank");
+	}
+
 	async function printInvoice(invoiceName: string, options: PrintInvoiceOptions = {}) {
 		try {
-			const printFormat = options.format || posStore?.defaultPrintFormat || "XPOS Thermal Receipt";
-			const letterHead = posStore.printSettings?.letter_head || "";
 			const doctype = options.doctype || resolveDoctype();
+			const printFormat = options.format || (await resolveInvoicePrintFormat(doctype, invoiceName));
+			const letterHead = posStore.printSettings?.letter_head || "";
 
 			const baseUrl = window.location.origin;
 			const printUrl = `${baseUrl}/printview?doctype=${encodeURIComponent(doctype)}&name=${encodeURIComponent(
@@ -100,5 +164,29 @@ export function usePrintInvoice() {
 		}
 	}
 
-	return { printInvoice, printInvoiceLocal };
+	/**
+	 * Print a sale that exists only on this device. The server's print view is unreachable
+	 * offline, so the receipt is built from the sale's snapshot and the cached receipt layout.
+	 */
+	async function printReceiptOffline(snapshot: ReceiptSnapshot): Promise<boolean> {
+		try {
+			const context = await getCachedReceiptContext(posStore.profileName);
+			if (!context) {
+				showError(
+					__(
+						"The receipt layout is not available offline. Reprint this sale from Order History once back online.",
+					),
+				);
+				return false;
+			}
+			printHtml(buildReceiptHtml(snapshot, context));
+			return true;
+		} catch (error) {
+			console.error("Offline print error:", error);
+			showError(__("Failed to print invoice"));
+			return false;
+		}
+	}
+
+	return { printInvoice, printInvoiceLocal, printReceiptOffline, openInvoicePrintView };
 }

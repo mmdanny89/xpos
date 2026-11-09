@@ -12,6 +12,9 @@ from frappe import _
 from frappe.utils import cstr, flt, get_datetime
 from frappe.utils.caching import redis_cache
 
+from xpos.api.customers import require_customer_access, user_may_see_address
+from xpos.api.profiles import resolve_pos_profile
+
 from .utils import fetch_sales_person_names
 
 
@@ -52,10 +55,18 @@ def get_customer_group_condition(pos_profile: dict) -> str:
 	return cond
 
 
+def server_pos_profile(pos_profile: str) -> str:
+	"""The caller's own POS Profile as JSON, so its customer groups come from the server, not the request."""
+	name = (json.loads(pos_profile) or {}).get("name") if pos_profile else None
+	return frappe.as_json(resolve_pos_profile(name).as_dict())
+
+
 @frappe.whitelist()
 def get_customer_balance(customer: str) -> dict:
 	if not customer:
 		return {"balance": 0, "customer_name": None}
+
+	pos = require_customer_access(customer)
 
 	try:
 		customer_doc = frappe.get_doc("Customer", customer)
@@ -65,9 +76,10 @@ def get_customer_balance(customer: str) -> dict:
 			"""
             SELECT SUM(debit - credit) AS balance
             FROM `tabGL Entry`
-            WHERE party_type = 'Customer' AND party = %(customer)s AND docstatus = 1
+            WHERE party_type = 'Customer' AND party = %(customer)s AND company = %(company)s
+                AND docstatus = 1
         """,
-			{"customer": customer},
+			{"customer": customer, "company": pos.company},
 			as_dict=True,
 		)
 
@@ -88,6 +100,7 @@ def get_customer_names(
 	start_after: str | None = None,
 	modified_after: str | None = None,
 ) -> list:
+	pos_profile = server_pos_profile(pos_profile)
 	_pos_profile = json.loads(pos_profile)
 	ttl = _pos_profile.get("server_cache_duration")
 	if ttl:
@@ -152,7 +165,7 @@ def get_customer_names(
 
 @frappe.whitelist()
 def get_customers_count(pos_profile: str) -> int:
-	pos_profile = json.loads(pos_profile)
+	pos_profile = json.loads(server_pos_profile(pos_profile))
 	filters = {"disabled": 0}
 	customer_groups = get_customer_groups(pos_profile)
 	if customer_groups:
@@ -166,6 +179,7 @@ def get_customer_info(customer: str | None = None) -> dict:
 	if not customer:
 		return {}
 
+	pos = require_customer_access(customer)
 	customer = frappe.get_doc("Customer", customer)
 
 	res = {"loyalty_points": None, "conversion_factor": None}
@@ -181,7 +195,7 @@ def get_customer_info(customer: str | None = None) -> dict:
 	res["birthday"] = customer.birthday
 	res["gender"] = customer.gender
 	res["tax_id"] = customer.tax_id
-	res["discount"] = customer.pos_discount
+	res["discount"] = flt(customer.get("discount"))
 	res["name"] = customer.name
 	res["customer_name"] = customer.customer_name
 	res["customer_group_price_list"] = frappe.get_value(
@@ -198,6 +212,7 @@ def get_customer_info(customer: str | None = None) -> dict:
 		lp_details = get_loyalty_program_details_with_points(
 			customer.name,
 			customer.loyalty_program,
+			company=pos.company,
 			silent=True,
 			include_expired_entry=False,
 		)
@@ -229,6 +244,7 @@ def get_customer_info(customer: str | None = None) -> dict:
 		as_dict=True,
 	)
 
+	addresses = [row for row in addresses if user_may_see_address(row.address_name)]
 	if addresses:
 		addr = addresses[0]
 		res["address_line1"] = addr.address_line1 or ""
@@ -374,6 +390,7 @@ def create_customer(
 
 @frappe.whitelist()
 def set_customer_info(customer: str, fieldname: str, value: str | None = None):
+	require_customer_access(customer, "write")
 	if fieldname == "loyalty_program":
 		frappe.db.set_value("Customer", customer, "loyalty_program", value)
 
@@ -409,7 +426,8 @@ def set_customer_info(customer: str, fieldname: str, value: str | None = None):
 
 @frappe.whitelist()
 def get_customer_addresses(customer: str) -> list:
-	return frappe.db.sql(
+	require_customer_access(customer)
+	addresses = frappe.db.sql(
 		"""
         SELECT
             address.name,
@@ -431,6 +449,7 @@ def get_customer_addresses(customer: str) -> list:
 		{"customer": customer},
 		as_dict=1,
 	)
+	return [row for row in addresses if user_may_see_address(row.name)]
 
 
 @frappe.whitelist()

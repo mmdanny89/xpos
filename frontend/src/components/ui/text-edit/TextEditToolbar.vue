@@ -16,7 +16,7 @@ import {
 import { ref, watch, onBeforeUnmount } from "vue";
 
 const props = defineProps<{
-	editor: Editor | null;
+	editor?: Editor;
 }>();
 
 const showLinkInput = ref(false);

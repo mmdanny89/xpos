@@ -207,21 +207,16 @@
    "no_copy": 1,
    "print_hide": 1,
    "read_only": 1
-  },
-  {
-   "fieldname": "amended_from",
-   "fieldtype": "Link",
-   "label": "Amended From",
-   "no_copy": 1,
-   "options": "POS Closing Shift",
-   "print_hide": 1,
-   "read_only": 1,
-   "search_index": 1
   }
  ],
  "is_submittable": 1,
- "links": [],
- "modified": "2026-03-29 00:03:01.517664",
+ "links": [
+  {
+   "link_doctype": "Journal Entry",
+   "link_fieldname": "pos_closing_shift"
+  }
+ ],
+ "modified": "2026-10-16 22:09:12.917777",
  "modified_by": "Administrator",
  "module": "X POS",
  "name": "POS Closing Shift",
@@ -254,25 +249,12 @@
    "share": 1,
    "submit": 1,
    "write": 1
-  },
-  {
-   "cancel": 1,
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "Administrator",
-   "share": 1,
-   "submit": 1,
-   "write": 1
   }
  ],
  "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
+ "title_field": "user",
  "track_changes": 1
 }

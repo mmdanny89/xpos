@@ -121,7 +121,7 @@ export async function initDatabase(config?: Partial<DbConfig>): Promise<void> {
 	currentConfig = { ...persisted, ...(config || {}) };
 
 	log.info(
-		`DB init — host: ${currentConfig.host}, port: ${currentConfig.port}, user: ${currentConfig.user}, db: ${currentConfig.database}`,
+		`DB init - host: ${currentConfig.host}, port: ${currentConfig.port}, user: ${currentConfig.user}, db: ${currentConfig.database}`,
 	);
 
 	saveDbConfig(currentConfig);
@@ -233,17 +233,42 @@ async function runMigrations(): Promise<void> {
 		log.warn("Migration for items.local_item_name failed", err);
 	}
 
+	const customerMigrations: [string, string][] = [
+		["discount", "DECIMAL(10,4) NOT NULL DEFAULT 0"],
+		["default_price_list", "VARCHAR(255) DEFAULT NULL"],
+	];
+	for (const [col, typedef] of customerMigrations) {
+		try {
+			const [existing] = await db.execute<RowDataPacket[]>(
+				"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'customers' AND COLUMN_NAME = ?",
+				[col],
+			);
+			if ((existing as RowDataPacket[]).length === 0) {
+				await db.execute(`ALTER TABLE \`customers\` ADD COLUMN \`${col}\` ${typedef}`);
+				log.info(`Migration: added customers.${col}`);
+			}
+		} catch (err) {
+			log.warn(`Migration for customers.${col} failed`, err);
+		}
+	}
+
 	const posProfileMigrations: [string, string][] = [
 		["allow_rate_change", "TINYINT(1) NOT NULL DEFAULT 0"],
 		["allow_change_posting_date", "TINYINT(1) NOT NULL DEFAULT 0"],
 		["hide_images", "TINYINT(1) NOT NULL DEFAULT 0"],
 		["hide_unavailable_items", "TINYINT(1) NOT NULL DEFAULT 0"],
 		["block_sale_beyond_available_qty", "TINYINT(1) NOT NULL DEFAULT 0"],
-		["display_items_in_stock", "TINYINT(1) NOT NULL DEFAULT 0"],
 		["cash_mode_of_payment", "VARCHAR(255) DEFAULT NULL"],
 		["apply_customer_discount", "TINYINT(1) NOT NULL DEFAULT 0"],
 		["allow_print_draft_invoices", "TINYINT(1) NOT NULL DEFAULT 0"],
 		["use_offline_mode", "TINYINT(1) NOT NULL DEFAULT 0"],
+		["force_price_from_customer_price_list", "TINYINT(1) NOT NULL DEFAULT 0"],
+		["allow_zero_rated_items", "TINYINT(1) NOT NULL DEFAULT 0"],
+		["use_delivery_charges", "TINYINT(1) NOT NULL DEFAULT 0"],
+		["auto_set_delivery_charges", "TINYINT(1) NOT NULL DEFAULT 0"],
+		["max_discount_percentage_allowed", "DECIMAL(10,4) NOT NULL DEFAULT 0"],
+		["hide_expected_amount", "TINYINT(1) NOT NULL DEFAULT 0"],
+		["use_customer_credit", "TINYINT(1) NOT NULL DEFAULT 0"],
 	];
 	for (const [col, typedef] of posProfileMigrations) {
 		try {
@@ -265,6 +290,7 @@ async function runMigrations(): Promise<void> {
 		["close_shift", "TINYINT(1) DEFAULT 0"],
 		["allow_reprint_invoice", "TINYINT(1) DEFAULT 0"],
 		["shift_report", "TINYINT(1) DEFAULT 0"],
+		["view_expected_amount", "TINYINT(1) DEFAULT 0"],
 		["allow_cancel_invoice", "TINYINT(1) DEFAULT 0"],
 		["unsettled_invoices", "TINYINT(1) DEFAULT 0"],
 		["apply_additional_discount", "TINYINT(1) DEFAULT 0"],
@@ -336,6 +362,30 @@ async function runMigrations(): Promise<void> {
 			}
 		} catch (err) {
 			log.warn(`Migration for pos_users rename ${oldCol} -> ${newCol} failed`, err);
+		}
+	}
+
+	const columnMigrations: [string, string, string][] = [
+		["sales_invoice_payments", "pos_tender_currency", "VARCHAR(10) DEFAULT NULL"],
+		["sales_invoice_payments", "pos_tender_amount", "DECIMAL(18,6) DEFAULT NULL"],
+		["sales_invoice_payments", "pos_exchange_rate", "DECIMAL(21,9) DEFAULT NULL"],
+		["modes_of_payment", "pos_tender_currency", "VARCHAR(10) DEFAULT NULL"],
+		["currencies", "number_format", "VARCHAR(20) DEFAULT NULL"],
+		["currencies", "smallest_currency_fraction_value", "DECIMAL(18,6) DEFAULT 0"],
+		["currencies", "symbol_on_right", "TINYINT(1) DEFAULT 0"],
+	];
+	for (const [table, col, typedef] of columnMigrations) {
+		try {
+			const [existing] = await db.execute<RowDataPacket[]>(
+				"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+				[table, col],
+			);
+			if ((existing as RowDataPacket[]).length === 0) {
+				await db.execute(`ALTER TABLE \`${table}\` ADD COLUMN \`${col}\` ${typedef}`);
+				log.info(`Migration: added ${table}.${col}`);
+			}
+		} catch (err) {
+			log.warn(`Migration for ${table}.${col} failed`, err);
 		}
 	}
 
